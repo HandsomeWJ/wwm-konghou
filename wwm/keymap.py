@@ -17,6 +17,13 @@ ROW_NAMES = ("low", "mid", "high")  # C3-B3, C4-B4, C5-B5
 NATURAL_DEGREE = {0: 0, 2: 1, 4: 2, 5: 3, 7: 4, 9: 5, 11: 6}  # C D E F G A B
 SHARP_DEGREE = {1: 0, 3: 1, 6: 3, 8: 4, 10: 5}  # C# D# F# G# A# -> natural below
 FLAT_DEGREE = {1: 1, 3: 2, 6: 4, 8: 5, 10: 6}  # Db Eb Gb Ab Bb -> natural above
+# What Where Winds Meet actually answers (probe of 2026-10-09): the black keys are
+# spelled C# Eb F# G# Bb. Shift+D and Shift+A are silent; Ctrl+E and Ctrl+B sound.
+ACCIDENTAL_STYLES = {
+    "sharp": {1: "sharp", 3: "sharp", 6: "sharp", 8: "sharp", 10: "sharp"},
+    "flat": {1: "flat", 3: "flat", 6: "flat", 8: "flat", 10: "flat"},
+    "mixed": {1: "sharp", 3: "flat", 6: "sharp", 8: "sharp", 10: "flat"},
+}
 SCALE_PCS = frozenset(NATURAL_DEGREE)
 PITCH_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 
@@ -48,7 +55,7 @@ DEFAULT_KEYMAP = {
     },
     "sharp_modifier": "lshift",
     "flat_modifier": "lctrl",
-    "accidental_style": "sharp",
+    "accidental_style": "mixed",
 }
 
 
@@ -77,9 +84,13 @@ class KeyMap:
             self.rows[row] = keys
         self.sharp_modifier: str = spec.get("sharp_modifier", "lshift")
         self.flat_modifier: str = spec.get("flat_modifier", "lctrl")
-        self.accidental_style: str = spec.get("accidental_style", "sharp")
-        if self.accidental_style not in ("sharp", "flat"):
-            raise ValueError("accidental_style must be 'sharp' or 'flat'")
+        self.accidental_style: str = spec.get("accidental_style", "mixed")
+        if self.accidental_style not in ACCIDENTAL_STYLES:
+            raise ValueError("accidental_style must be 'sharp', 'flat' or 'mixed'")
+        self.accidentals: dict[int, str] = dict(ACCIDENTAL_STYLES[self.accidental_style])
+        for name, how in spec.get("accidentals", {}).items():  # per-black-key override, e.g. {"D#": "flat"}
+            pc = PITCH_NAMES.index(name.replace("b", "#") if name.endswith("b") else name)
+            self.accidentals[pc] = how
         self.scancodes: dict[str, int] = dict(SCANCODES)
         self.scancodes.update(spec.get("scancodes", {}))
         missing = [k for k in self.used_keys() if k not in self.scancodes]
@@ -105,7 +116,7 @@ class KeyMap:
         pc = pitch % 12
         if pc in NATURAL_DEGREE:
             return KeyPress(row[NATURAL_DEGREE[pc]])
-        if self.accidental_style == "sharp":
+        if self.accidentals[pc] == "sharp":
             return KeyPress(row[SHARP_DEGREE[pc]], self.sharp_modifier)
         return KeyPress(row[FLAT_DEGREE[pc]], self.flat_modifier)
 
@@ -116,5 +127,6 @@ class KeyMap:
             "sharp_modifier": self.sharp_modifier,
             "flat_modifier": self.flat_modifier,
             "accidental_style": self.accidental_style,
+            "accidentals": {PITCH_NAMES[pc]: how for pc, how in sorted(self.accidentals.items())},
             "scancodes": {k: self.scancodes[k] for k in self.used_keys()},
         }

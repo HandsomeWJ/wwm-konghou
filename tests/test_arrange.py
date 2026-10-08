@@ -26,8 +26,12 @@ def test_keymap_rows_and_sharps():
     assert km.press_for(72) == KeyPress("q")          # C5 top row
     assert km.press_for(83) == KeyPress("u")          # B5
     assert km.press_for(61) == KeyPress("a", "lshift")  # C#4 = Shift+C
-    assert km.press_for(70) == KeyPress("h", "lshift")  # A#4 = Shift+A
+    assert km.press_for(63) == KeyPress("d", "lctrl")   # Eb4 = Ctrl+E (the game has no Shift+D)
+    assert km.press_for(70) == KeyPress("j", "lctrl")   # Bb4 = Ctrl+B
+    assert km.press_for(68) == KeyPress("g", "lshift")  # G#4 = Shift+G
     assert km.press_for(65) == KeyPress("f")          # F4 has no sharp below it
+    sharp_only = KeyMap({**km.to_json(), "accidental_style": "sharp", "accidentals": {}})
+    assert sharp_only.press_for(63) == KeyPress("s", "lshift")
 
 
 def test_keymap_rejects_out_of_range():
@@ -151,6 +155,9 @@ def test_script_orders_naturals_before_shift_group():
     assert ev["groups"][1] == {"mod": "lshift", "keys": ["g"]}
     assert ev["notes"] == ["C4", "E4", "G#4"]
     assert script["keymap"]["scancodes"]["lshift"] == 0x2A
+    both = build_script([Onset(0.0, notes_at([61, 63, 60]))], km, "36")["events"][0]  # C#4 Eb4 C4
+    assert both["groups"][0] == {"mod": None, "keys": ["a"]}
+    assert sorted((g["mod"], g["keys"]) for g in both["groups"][1:]) == [("lctrl", ["d"]), ("lshift", ["a"])]
 
 
 def test_midi_roundtrip_and_no_overlap(tmp_path):
@@ -176,6 +183,7 @@ def test_calibration_piece_arranges_losslessly(tmp_path):
     loaded = json.loads((tmp_path / "c.wwm.json").read_text())
     assert len(loaded["events"]) == len(out)
     assert loaded["events"][1]["groups"][0] == {"mod": "lshift", "keys": ["z"]}  # C#3
+    assert loaded["events"][3]["groups"][0] == {"mod": "lctrl", "keys": ["c"]}   # Eb3 = Ctrl+E
 
 
 def test_preview_renders_wav(tmp_path):

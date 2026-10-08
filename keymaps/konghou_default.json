@@ -7,5 +7,6 @@
   },
   "sharp_modifier": "lshift",
   "flat_modifier": "lctrl",
-  "accidental_style": "sharp"
+  "accidental_style": "mixed",
+  "accidentals": {"C#": "sharp", "D#": "flat", "F#": "sharp", "G#": "sharp", "A#": "flat"}
 }

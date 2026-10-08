@@ -22,7 +22,7 @@ SR = 22050
 ANALYSIS_START = 0.03   # seconds after the onset: skip the attack transient
 NFFT = 32768
 PEAK_TOL_CENTS = 45.0   # a note is "there" when a spectral peak sits within this of its pitch
-REL_DB = 14.0           # ... and is within this of the loudest peak in the window
+REL_DB = 18.0           # ... and is within this of the loudest peak in the window (G#4's fundamental sits ~16 dB under its octave)
 RISE_DB = 6.0           # ... and rose this much across the onset
 NOISE_DB = 12.0         # ... and stands this far above the window's median spectrum
 

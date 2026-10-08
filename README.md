@@ -62,8 +62,13 @@ respect the voice limit or the per-key re-trigger gap.
 ### Key map
 
 `keymaps/konghou_default.json` is the default layout: Q–U = C5–B5, A–J = C4–B4,
-Z–M = C3–B3, left Shift = sharp. If your binds differ, copy the file, edit it and
-pass `--keymap my.json`. Scan codes for every key are built in.
+Z–M = C3–B3. The five black keys are spelled the way the game answers them
+(probed on 2026-10-09): **C♯ = Shift+C, E♭ = Ctrl+E, F♯ = Shift+F, G♯ = Shift+G,
+B♭ = Ctrl+B**. Shift+D and Shift+A produce nothing in this game. `accidental_style`
+can be `mixed` (that table), `sharp` (Shift on the natural below) or `flat` (Ctrl on
+the natural above), and `accidentals` overrides single keys, e.g. `{"D#": "flat"}`.
+If your binds differ, copy the file, edit it and pass `--keymap my.json`. Scan codes
+for every key are built in.
 
 ### Calibration
 
