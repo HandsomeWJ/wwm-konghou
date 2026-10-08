@@ -49,3 +49,16 @@ def test_bass_line_keeps_strong_beats_only(tmp_path):
     s.write("musicxml", fp=str(xml))
     low = bass_line(xml, {1: 120.0})
     assert [(round(n.t, 2), n.pitch) for n in low] == [(0.0, 48), (1.0, 52)]
+
+
+def test_skyline_melody_skips_left_hand_notes_between_melody_notes():
+    from wwm.melody import skyline_melody
+
+    notes = []
+    for i in range(8):
+        notes.append(Note(i * 0.5, 76 + (i % 3)))        # melody around E5
+        notes.append(Note(i * 0.5 + 0.25, 50 + (i % 4)))  # left-hand notes in between, far below
+    notes.append(Note(6.0, 55))  # after a 1.5 s rest a low note starts a new phrase
+    mel = skyline_melody(sorted(notes, key=lambda n: n.t))
+    assert [n.pitch for n in mel][:8] == [76, 77, 78, 76, 77, 78, 76, 77]
+    assert mel[-1].pitch == 55

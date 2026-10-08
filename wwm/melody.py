@@ -156,3 +156,24 @@ def melody_from_score(xml_path: str | Path, tempo_map: dict[int, float] | None,
         melody, anchors = retime(align_notes, recording, apply_to=melody)
         melody, report = snap_to_recording(melody, recording)
     return melody, report, anchors
+
+
+def skyline_melody(notes: list[Note], window: float = 0.03, drop_below: int = 9, phrase_gap: float = 1.0,
+                   history: int = 8) -> list[Note]:
+    """Melody estimate from a transcription alone: the top note of each onset, except
+    that a top note far below the recent melody register while the melody is still
+    fresh is taken for accompaniment (left-hand notes between melody notes). After a
+    rest of `phrase_gap` seconds any top note starts a new phrase."""
+    import statistics
+
+    out: list[Note] = []
+    recent: list[int] = []
+    last_t = -1e9
+    for o in cluster_onsets(notes, window):
+        top = max(o.notes, key=lambda n: n.pitch)
+        if recent and o.t - last_t < phrase_gap and top.pitch < statistics.median(recent) - drop_below:
+            continue
+        out.append(Note(o.t, top.pitch, top.vel, top.dur))
+        recent = (recent + [top.pitch])[-history:]
+        last_t = o.t
+    return out

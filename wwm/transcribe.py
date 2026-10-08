@@ -46,25 +46,11 @@ def pick_device(requested: str) -> str:
 
 
 def load_audio(path: str, sr: int):
-    """Mono float32 at the model's sample rate. soundfile handles mp3/wav/flac;
-    librosa is the fallback for anything else."""
-    import numpy as np
+    """Mono float32 at the model's sample rate; any format ffmpeg can read (mp3, m4a,
+    mp4, wav, flac)."""
+    from .verify import load_audio as _load
 
-    try:
-        import soundfile as sf
-
-        data, file_sr = sf.read(path, dtype="float32", always_2d=True)
-        mono = data.mean(axis=1)
-        if file_sr != sr:
-            import librosa
-
-            mono = librosa.resample(mono, orig_sr=file_sr, target_sr=sr)
-        return np.ascontiguousarray(mono, dtype=np.float32)
-    except Exception:
-        import librosa
-
-        mono, _ = librosa.load(path, sr=sr, mono=True)
-        return np.ascontiguousarray(mono, dtype=np.float32)
+    return _load(path, sr=sr)
 
 
 def transcribe_file(audio_path: str, midi_out: str | Path, device: str = "auto") -> dict:

@@ -219,8 +219,23 @@ def melody(musicxml, out, bpm, staff, align_midi, recording_midi, bass, bass_sta
 
 
 @main.command()
+@click.argument("midi", type=click.Path(exists=True, dir_okay=False))
+@click.option("-o", "--out", default=None, help="Output MIDI (default: <midi>.skyline.mid)")
+@click.option("--drop-below", default=9, show_default=True, help="Semitones under the recent melody register that mark a left-hand note")
+def skyline(midi: str, out: str | None, drop_below: int) -> None:
+    """Estimate the melody from a transcription alone (top line with register continuity), for wwm thin when there is no score."""
+    from .export import write_midi
+    from .melody import skyline_melody
+
+    notes = skyline_melody(load_midi(midi), drop_below=drop_below)
+    out_path = Path(out) if out else Path(midi).with_suffix(".skyline.mid")
+    write_midi(notes, out_path, clamp=False)
+    click.echo(f"wrote {out_path} ({len(notes)} melody notes)")
+
+
+@main.command()
 @click.argument("full_midi", type=click.Path(exists=True, dir_okay=False))
-@click.option("--melody", "melody_midi", required=True, type=click.Path(exists=True), help="Melody MIDI on the same timeline (from wwm melody); these notes are never touched")
+@click.option("--melody", "melody_midi", required=True, type=click.Path(exists=True), help="Melody MIDI on the same timeline (from wwm melody or wwm skyline); these notes are never touched")
 @click.option("-o", "--out", default=None, help="Output MIDI (default: <full>.thin.mid)")
 @click.option("--repeat-window", default=0.3, show_default=True, help="Seconds: an accompaniment pitch is not struck again within this")
 @click.option("--busy-gap", default=0.25, show_default=True, help="Seconds between accompaniment onsets while the melody runs fast")

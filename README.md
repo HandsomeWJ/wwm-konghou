@@ -103,6 +103,20 @@ Ranges you already like can be protected:
 .venv/bin/wwm arrange out/song.thin.mid --transpose-map "0-50:-1,50-999:0"   # keep the key regions of the earlier take
 ```
 
+### A recording with no score
+
+```bash
+.venv/bin/yt-dlp -f bestaudio -x --audio-format m4a -o "samples/song.%(ext)s" <video url>
+.venv/bin/wwm transcribe samples/song.m4a -o out/song.mid       # mp3 / m4a / mp4 / wav
+.venv/bin/wwm skyline out/song.mid -o out/song.melody.mid        # melody estimate for thinning
+.venv/bin/wwm thin out/song.mid --melody out/song.melody.mid -o out/song.thin.mid
+.venv/bin/wwm arrange out/song.thin.mid
+```
+
+`wwm skyline` takes the top note of every onset, skipping top notes that sit far
+under the recent melody register while the melody is still fresh (left-hand notes
+between melody notes).
+
 ### Melody only
 
 A sustaining harp turns dense piano accompaniment into a wash. For a clean
