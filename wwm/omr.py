@@ -181,6 +181,47 @@ def score_notes(score, tempo_map: dict[int, float] | None):
     return notes
 
 
+def measure_times(xml_path: Path, tempo_map: dict[int, float] | None) -> list[tuple[int, float]]:
+    """(measure number, start time in seconds) for every measure, using the same tempo
+    logic as score_notes, so merge/align reports can name measures."""
+    from music21 import converter, stream
+
+    from music21 import tempo as m21tempo
+
+    score = converter.parse(str(xml_path))
+    part = (score.parts or [score])[0]
+    measures = list(part.getElementsByClass(stream.Measure))
+    offsets = [(m.number, m.getOffsetInHierarchy(score)) for m in measures]
+
+    segments: list[tuple[float, float]] = []
+    if tempo_map:
+        moff = {num: off for num, off in offsets}
+        for measure, bpm in sorted(tempo_map.items()):
+            off = moff.get(measure)
+            if off is None and moff:
+                off = moff[min(moff, key=lambda k: abs(k - measure))]
+            segments.append((off or 0.0, bpm))
+    else:
+        for mm in score.recurse().getElementsByClass(m21tempo.MetronomeMark):
+            q = mm.getQuarterBPM() if hasattr(mm, "getQuarterBPM") else mm.number
+            if q:
+                segments.append((mm.getOffsetInHierarchy(score), float(q)))
+    segments.sort()
+    if not segments or segments[0][0] > 0:
+        segments.insert(0, (0.0, segments[0][1] if segments else 120.0))
+
+    def seconds(ql: float) -> float:
+        total = 0.0
+        for i, (off, bpm) in enumerate(segments):
+            nxt = segments[i + 1][0] if i + 1 < len(segments) else float("inf")
+            if ql <= off:
+                break
+            total += (min(ql, nxt) - off) * 60.0 / bpm
+        return total
+
+    return [(num, seconds(off)) for num, off in offsets]
+
+
 def _score_to_midi(score, midi_out: Path, tempo_map: dict[int, float] | None) -> int:
     from .export import write_midi
 

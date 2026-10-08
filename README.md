@@ -140,10 +140,22 @@ piece has three), so pass `--bpm` with a measure map.
 1. Tempo and meter: give `--bpm "measure:bpm,..."` using the measure numbers of the
    OMR output (open the MusicXML in MuseScore to see them; they can be one or two
    off from the print).
-2. Wrong or missing notes: open the `.musicxml` next to the MIDI in MuseScore, fix
-   the measures that `scripts/align_midi.py` flags, export MusicXML, `wwm xml2mid`.
-3. If you also have a recording, the transcription is usually the better source;
-   use the score only where the recording is unclear.
+2. With a recording of the same arrangement, let the transcription patch the score:
+
+   ```bash
+   .venv/bin/wwm merge out/song_from_score.mid out/song_from_mp3.mid -o out/song.merged.mid \
+       --musicxml out/song_from_score.omr/song.mxl --bpm "1:112.5,32:87,44:110"
+   ```
+
+   The score keeps its clean timeline. Chords that agree in both sources become
+   anchors; everything between two anchors that disagrees (misread pitches, dropped
+   notes, garbled tuplets) is replaced by the recording's notes, time-warped to fit.
+   The report lists every patched region with measure numbers. On the test piece this
+   took the score from 87% to 95% agreement with the recording, with no divergent
+   region left.
+3. Wrong or missing notes without a recording: open the `.musicxml` next to the MIDI
+   in MuseScore, fix the measures that `scripts/align_midi.py` flags, export
+   MusicXML, `wwm xml2mid`.
 
 ## Risk
 

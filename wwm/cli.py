@@ -126,5 +126,44 @@ def xml2mid(musicxml: str, out: str | None, bpm: str | None) -> None:
     click.echo(f"wrote {out_path} ({notes} notes)")
 
 
+@main.command()
+@click.argument("score_midi", type=click.Path(exists=True, dir_okay=False))
+@click.argument("recording_midi", type=click.Path(exists=True, dir_okay=False))
+@click.option("-o", "--out", default=None, help="Merged MIDI (default: <score>.merged.mid)")
+@click.option("--min-jaccard", default=0.5, show_default=True, help="Chord agreement needed to anchor the two sources")
+@click.option("--min-velocity", default=30, show_default=True, help="Ignore recording notes quieter than this (transcription ghosts)")
+@click.option("--musicxml", default=None, type=click.Path(exists=True), help="Score MusicXML, to report measure numbers")
+@click.option("--bpm", default=None, help="Tempo map used when the score MIDI was made, for the measure numbers")
+def merge_cmd(score_midi, recording_midi, out, min_jaccard, min_velocity, musicxml, bpm) -> None:
+    """Patch an OMR score MIDI with a transcription of a recording of the same piece."""
+    from .export import write_midi
+    from .merge import merge
+
+    score = load_midi(score_midi)
+    recording = load_midi(recording_midi)
+    merged, report = merge(score, recording, min_jaccard=min_jaccard, min_velocity=min_velocity)
+    out_path = Path(out) if out else Path(score_midi).with_suffix(".merged.mid")
+    write_midi(merged, out_path, clamp=False)
+    measure_of = None
+    if musicxml:
+        from .omr import measure_times, parse_tempo_map
+
+        starts = measure_times(Path(musicxml), parse_tempo_map(bpm))
+
+        def measure_of(t: float) -> int:
+            num = starts[0][0]
+            for number, start in starts:
+                if start <= t + 1e-6:
+                    num = number
+            return num
+
+    for line in report.lines(measure_of):
+        click.echo(line)
+    click.echo(f"wrote {out_path}")
+
+
+main.add_command(merge_cmd, name="merge")
+
+
 if __name__ == "__main__":
     main()
