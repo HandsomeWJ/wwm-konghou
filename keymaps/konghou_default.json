@@ -1,0 +1,11 @@
+{
+  "name": "konghou_default",
+  "rows": {
+    "low":  ["z", "x", "c", "v", "b", "n", "m"],
+    "mid":  ["a", "s", "d", "f", "g", "h", "j"],
+    "high": ["q", "w", "e", "r", "t", "y", "u"]
+  },
+  "sharp_modifier": "lshift",
+  "flat_modifier": "lctrl",
+  "accidental_style": "sharp"
+}

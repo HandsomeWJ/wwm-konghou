@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+player/target/
+models/
+*.wav
+*.mp3
+*.flac
+*.log
+.DS_Store
+out/
