@@ -81,10 +81,18 @@ interpolated, so the result keeps the recording's tempo changes and rubato.
 ### Thinning the accompaniment
 
 Dense piano accompaniment, especially repeated chords, piles up on a sustaining
-instrument. `wwm thin` keeps the melody exactly and prunes the rest with two rules:
-an accompaniment pitch is not struck again within 0.3 s (the previous strike still
-rings), and while the melody runs fast, accompaniment onsets stay at least 0.25 s
-apart. Ranges you already like can be protected:
+instrument. `wwm thin` keeps the melody and prunes the rest with four rules:
+
+- a pianistic figuration (upper register running at 4+ notes/s over 6 or fewer
+  pitches, like sextuplet shimmers) keeps every second onset, so it stays regular
+  at half the density; a slow melody riding on it keeps every note;
+- under such a figuration the last bass chord is re-struck whenever the bass has
+  been silent for 2.2 s, so the harmony keeps ringing;
+- an accompaniment pitch is not struck again within 0.3 s (the previous strike
+  still rings);
+- while the melody runs fast, accompaniment onsets stay at least 0.25 s apart.
+
+Ranges you already like can be protected:
 
 ```bash
 .venv/bin/wwm thin out/song.final.mid --melody out/song.melody.mid --protect 25-111 -o out/song.thin.mid

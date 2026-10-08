@@ -21,12 +21,15 @@ class ThinReport:
     accompaniment: int = 0
     dropped_repeats: int = 0
     dropped_busy: int = 0
+    dropped_figuration: int = 0
+    added_support: int = 0
     per_window: list[tuple[float, int, int]] = field(default_factory=list)  # (start, acc notes before, after)
 
     def lines(self) -> list[str]:
         out = [
-            f"melody notes {self.melody} (untouched), accompaniment {self.accompaniment}: "
-            f"dropped {self.dropped_repeats} re-strikes and {self.dropped_busy} notes under a running melody",
+            f"melody notes {self.melody}, accompaniment {self.accompaniment}: "
+            f"dropped {self.dropped_repeats} re-strikes and {self.dropped_busy} notes under a running melody; "
+            f"figuration thinned by {self.dropped_figuration} notes, {self.added_support} supporting chord strikes added",
         ]
         for start, before, after in self.per_window:
             if before:
@@ -51,12 +54,92 @@ def split_melody(notes: list[Note], melody: list[Note], tol: float = 0.1) -> tup
     return mel, acc
 
 
+BASS_SPLIT = 55  # below G3 counts as bass register for the figuration rules
+
+
+def figuration_cells(upper: list[Note], rate: float, max_distinct: int, cell: float = 2.0) -> set[int]:
+    """Cells (index = floor(t / cell)) where the upper register is a pianistic
+    figuration: fast (>= rate notes/s) yet circling over few pitches (<= max_distinct)."""
+    cells: set[int] = set()
+    by_cell: dict[int, list[Note]] = {}
+    for n in upper:
+        by_cell.setdefault(int(n.t // cell), []).append(n)
+    for c, ns in by_cell.items():
+        if len(ns) / cell >= rate and len({n.pitch for n in ns}) <= max_distinct:
+            cells.add(c)
+    return cells
+
+
 def thin(notes: list[Note], melody: list[Note], repeat_window: float = 0.3, busy_gap: float = 0.25,
          busy_rate: float = 5.0, window: float = 0.03,
-         protect: list[tuple[float, float]] | None = None) -> tuple[list[Note], ThinReport]:
-    """`protect` lists (start, end) ranges in seconds that are left exactly as they are."""
+         protect: list[tuple[float, float]] | None = None,
+         figuration_rate: float = 4.0, figuration_distinct: int = 6, figuration_keep: int = 2,
+         support_gap: float = 2.2) -> tuple[list[Note], ThinReport]:
+    """`protect` lists (start, end) ranges in seconds that are left exactly as they are.
+
+    Rule 3 (first): where the upper register is a figuration (fast, few pitches, e.g.
+    sextuplet shimmers), keep every `figuration_keep`-th upper-register onset so the
+    figure stays regular at a fraction of the density.
+    Rule 4: in those stretches, re-strike the last bass-register chord whenever the
+    bass has been silent for `support_gap` seconds, so the harmony keeps ringing.
+    Rules 1-2 then prune the accompaniment: no pitch re-struck within
+    `repeat_window`; onsets at least `busy_gap` apart while the melody runs fast."""
+    report = ThinReport()
+
+    def protected(t: float) -> bool:
+        return bool(protect) and any(a <= t < b for a, b in protect)
+
+    upper = [n for n in notes if n.pitch >= BASS_SPLIT]
+    lower = [n for n in notes if n.pitch < BASS_SPLIT]
+    fig = figuration_cells(upper, figuration_rate, figuration_distinct)
+    if fig:
+        mel0, _ = split_melody(upper, melody)
+        mel_ids = {id(n) for n in mel0}
+        # a slow melody riding on a fast figuration keeps every note; when the melody
+        # itself is the figure (>= 3 melody notes/s in the cell) everything is thinned
+        mel_rate_cell: dict[int, float] = {}
+        for n in mel0:
+            c = int(n.t // 2.0)
+            mel_rate_cell[c] = mel_rate_cell.get(c, 0.0) + 0.5
+        kept_upper: list[Note] = []
+        counter = 0
+        fig_onset_times: list[float] = []
+        for o in cluster_onsets(upper, window):
+            c = int(o.t // 2.0)
+            if c in fig and not protected(o.t):
+                fig_onset_times.append(o.t)
+                has_melody = any(id(n) in mel_ids for n in o.notes)
+                if has_melody and mel_rate_cell.get(c, 0.0) < 3.0:
+                    kept_upper.extend(o.notes)  # slow melody: untouched, not counted
+                    continue
+                if counter % figuration_keep == 0:
+                    kept_upper.extend(o.notes)
+                else:
+                    report.dropped_figuration += len(o.notes)
+                counter += 1
+            else:
+                counter = 0
+                kept_upper.extend(o.notes)
+        upper = kept_upper
+        if support_gap > 0:
+            low_onsets = cluster_onsets(lower, window)
+            extra: list[Note] = []
+            last_chord: list[Note] | None = None
+            last_t = -1e9
+            li = 0
+            for t in fig_onset_times:
+                while li < len(low_onsets) and low_onsets[li].t <= t:
+                    last_chord, last_t = low_onsets[li].notes, low_onsets[li].t
+                    li += 1
+                if last_chord and t - last_t >= support_gap:
+                    extra.extend(Note(t, n.pitch, n.vel, n.dur) for n in last_chord)
+                    last_t = t
+                    report.added_support += len(last_chord)
+            lower = lower + extra
+        notes = sorted(upper + lower, key=lambda n: (n.t, n.pitch))
+
     mel, acc = split_melody(notes, melody)
-    report = ThinReport(melody=len(mel), accompaniment=len(acc))
+    report.melody, report.accompaniment = len(mel), len(acc)
     mel_times = sorted(m.t for m in mel)
 
     def melody_rate(t: float) -> float:

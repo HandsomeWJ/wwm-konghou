@@ -226,7 +226,9 @@ def melody(musicxml, out, bpm, staff, align_midi, recording_midi, bass, bass_sta
 @click.option("--busy-gap", default=0.25, show_default=True, help="Seconds between accompaniment onsets while the melody runs fast")
 @click.option("--busy-rate", default=5.0, show_default=True, help="Melody notes per second that count as running fast")
 @click.option("--protect", default=None, help="Ranges left untouched, e.g. '25-111' or '25-111,200-210' (seconds)")
-def thin(full_midi, melody_midi, out, repeat_window, busy_gap, busy_rate, protect) -> None:
+@click.option("--figuration-keep", default=2, show_default=True, help="In fast few-pitch figurations keep every Nth melody onset (1 = keep all)")
+@click.option("--support-gap", default=2.2, show_default=True, help="Seconds: re-strike the held chord under a figuration after this silence (0 = off)")
+def thin(full_midi, melody_midi, out, repeat_window, busy_gap, busy_rate, protect, figuration_keep, support_gap) -> None:
     """Thin the accompaniment of a full arrangement for a sustaining instrument (melody untouched)."""
     from .export import write_midi
     from .thin import thin as do_thin
@@ -234,7 +236,8 @@ def thin(full_midi, melody_midi, out, repeat_window, busy_gap, busy_rate, protec
     ranges = None
     if protect:
         ranges = [(float(a), float(b)) for a, b in (item.split("-") for item in protect.split(","))]
-    notes, report = do_thin(load_midi(full_midi), load_midi(melody_midi), repeat_window, busy_gap, busy_rate, protect=ranges)
+    notes, report = do_thin(load_midi(full_midi), load_midi(melody_midi), repeat_window, busy_gap, busy_rate,
+                            protect=ranges, figuration_keep=figuration_keep, support_gap=support_gap)
     out_path = Path(out) if out else Path(full_midi).with_suffix(".thin.mid")
     write_midi(notes, out_path, clamp=False)
     for line in report.lines():
