@@ -72,9 +72,32 @@ pass `--keymap my.json`. Scan codes for every key are built in.
 .venv/bin/wwm arrange examples/calibration_chromatic.mid -o out/calibration
 ```
 
-Play `out/calibration.wwm.json` in game. You should hear: a chromatic scale C3→B5
+Play `out/calibration.wwm.json` in game. It contains a chromatic scale C3→B5
 (every key and every Shift combo), a C major chord twice, a C–E–G# chord twice
 (Shift must not leak onto C and E), eight fast G4 repeats, then a scale run in 16ths.
+
+You do not need to judge it by ear. Record the game while it plays (Xbox Game Bar,
+Win+Alt+R, with game music and ambience turned down in the game's audio settings)
+and let the verifier read the recording:
+
+```bash
+.venv/bin/wwm verify "Where Winds Meet 2026-10-09.mp4" out/calibration.wwm.json
+```
+
+It finds where the script starts in the recording, checks every onset for the
+expected pitches (pYIN for slow notes, spectral rise and onset detection for fast
+ones), and prints a summary that names the setting to change:
+
+```
+chromatic scale: naturals 21/21, sharps 15/15
+C major chord (4 keys at once): 2/2 complete
+C-E-G# chord (Shift must not leak): 2/2 clean
+fast G4 repeats (100 ms apart): 8/8 onsets heard
+16th-note run (125 ms apart): 15/15 onsets heard
+```
+
+`wwm verify` works for any script, not only the calibration: it reports the
+percentage of notes heard and lists the misses.
 
 ### Player options
 
@@ -93,6 +116,10 @@ wwm-play.exe song.wwm.json [--speed 1.0] [--hold-ms 20] [--modifier-settle-ms 25
   messages; run the calibration piece once in this mode to confirm sharps (Shift)
   still register.
 - `--focus` brings the game window to the front before the lead-in.
+- The game window is found by title (`--window`, default "Where Winds Meet") **or by
+  process name**: `wwm.exe` and `yysls.exe` are matched automatically, so a Chinese
+  window title is fine. `--process <name>` matches any other executable, and
+  `--list-windows` prints every visible window with its process name.
 
 - Dropped sharps → raise `--modifier-settle-ms` (25 → 40).
 - Missed fast repeats → raise `--retrigger-ms` in `wwm arrange` (40 → 60).

@@ -165,5 +165,26 @@ def merge_cmd(score_midi, recording_midi, out, min_jaccard, min_velocity, musicx
 main.add_command(merge_cmd, name="merge")
 
 
+@main.command()
+@click.argument("recording", type=click.Path(exists=True, dir_okay=False))
+@click.argument("script", type=click.Path(exists=True, dir_okay=False))
+@click.option("--offset", default=None, type=float, help="Seconds into the recording where the script starts (default: detected)")
+@click.option("-v", "--verbose", is_flag=True, help="List every onset, not only the misses")
+def verify(recording: str, script: str, offset: float | None, verbose: bool) -> None:
+    """Check a game recording (mp4/mkv/mp3/wav) against the .wwm.json that was played."""
+    from .verify import calibration_summary, load_audio, load_script, report_lines, verify as run_verify
+
+    data = load_script(script)
+    y = load_audio(recording)
+    report = run_verify(data, y, offset=offset)
+    for line in report_lines(report, verbose):
+        click.echo(line)
+    summary = calibration_summary(report, y)
+    if summary:
+        click.echo("calibration summary:")
+        for line in summary:
+            click.echo("  " + line)
+
+
 if __name__ == "__main__":
     main()

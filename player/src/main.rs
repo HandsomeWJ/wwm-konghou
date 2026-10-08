@@ -15,7 +15,8 @@ use score::{Event, Script};
 #[command(name = "wwm-play", version, about = "Plays a .wwm.json key script into Where Winds Meet")]
 struct Args {
     /// Script produced by `wwm arrange` (song.wwm.json)
-    script: String,
+    #[arg(required_unless_present = "list_windows")]
+    script: Option<String>,
     /// Playback speed multiplier (0.5 = half speed)
     #[arg(long, default_value_t = 1.0)]
     speed: f64,
@@ -34,6 +35,12 @@ struct Args {
     /// Game window title (substring, case-insensitive) used by --focus, --background and the foreground guard
     #[arg(long, default_value = "Where Winds Meet")]
     window: String,
+    /// Game process name (substring, case-insensitive). Default matches wwm.exe / yysls.exe, the known game executables
+    #[arg(long)]
+    process: Option<String>,
+    /// Print every visible window with its process name and size, then exit
+    #[arg(long)]
+    list_windows: bool,
     /// Bring the game window to the front before playing
     #[arg(long)]
     focus: bool,
@@ -111,12 +118,15 @@ mod hotkeys {
 #[cfg(windows)]
 mod platform {
     pub use windows_sys::Win32::Foundation::HWND;
-    use windows_sys::Win32::Foundation::{BOOL, LPARAM};
+    use windows_sys::Win32::Foundation::{CloseHandle, BOOL, LPARAM, RECT};
     use windows_sys::Win32::Media::{timeBeginPeriod, timeEndPeriod};
-    use windows_sys::Win32::System::Threading::{GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_TIME_CRITICAL};
+    use windows_sys::Win32::System::Threading::{
+        GetCurrentProcessId, GetCurrentThread, OpenProcess, QueryFullProcessImageNameW, SetThreadPriority,
+        PROCESS_QUERY_LIMITED_INFORMATION, THREAD_PRIORITY_TIME_CRITICAL,
+    };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, GetForegroundWindow, GetWindowTextW, IsIconic, IsWindowVisible, SetForegroundWindow, ShowWindow,
-        SW_RESTORE,
+        EnumWindows, GetForegroundWindow, GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, IsIconic,
+        IsWindowVisible, SetForegroundWindow, ShowWindow, SW_RESTORE,
     };
 
     pub fn precise_timers(on: bool) {
@@ -130,38 +140,77 @@ mod platform {
         }
     }
 
-    struct Search {
-        needle: String,
-        found: HWND,
+    pub struct WindowInfo {
+        pub hwnd: HWND,
+        pub title: String,
+        pub process: String,
+        pub area: i64,
     }
 
-    unsafe extern "system" fn visit(hwnd: HWND, lparam: LPARAM) -> BOOL {
-        let search = &mut *(lparam as *mut Search);
+    unsafe fn process_name(hwnd: HWND) -> String {
+        let mut pid: u32 = 0;
+        GetWindowThreadProcessId(hwnd, &mut pid);
+        if pid == 0 || pid == GetCurrentProcessId() {
+            return String::new();
+        }
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle.is_null() {
+            return String::new();
+        }
+        let mut buf = [0u16; 1024];
+        let mut len = buf.len() as u32;
+        let ok = QueryFullProcessImageNameW(handle, 0, buf.as_mut_ptr(), &mut len);
+        CloseHandle(handle);
+        if ok == 0 {
+            return String::new();
+        }
+        let path = String::from_utf16_lossy(&buf[..len as usize]);
+        path.rsplit(['\\', '/']).next().unwrap_or("").to_string()
+    }
+
+    unsafe extern "system" fn collect(hwnd: HWND, lparam: LPARAM) -> BOOL {
+        let list = &mut *(lparam as *mut Vec<WindowInfo>);
         if IsWindowVisible(hwnd) == 0 {
             return 1;
         }
         let mut buf = [0u16; 256];
         let len = GetWindowTextW(hwnd, buf.as_mut_ptr(), buf.len() as i32);
-        if len > 0 {
-            let title = String::from_utf16_lossy(&buf[..len as usize]).to_lowercase();
-            if title.contains(&search.needle) {
-                search.found = hwnd;
-                return 0;
-            }
-        }
+        let title = String::from_utf16_lossy(&buf[..len.max(0) as usize]);
+        let mut rect = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        GetWindowRect(hwnd, &mut rect);
+        let area = (rect.right - rect.left).max(0) as i64 * (rect.bottom - rect.top).max(0) as i64;
+        list.push(WindowInfo { hwnd, title, process: process_name(hwnd), area });
         1
     }
 
-    pub fn find_window(needle: &str) -> Option<HWND> {
-        let mut search = Search { needle: needle.to_lowercase(), found: std::ptr::null_mut() };
+    pub fn list_windows() -> Vec<WindowInfo> {
+        let mut list: Vec<WindowInfo> = Vec::new();
         unsafe {
-            EnumWindows(Some(visit), &mut search as *mut Search as LPARAM);
+            EnumWindows(Some(collect), &mut list as *mut Vec<WindowInfo> as LPARAM);
         }
-        if search.found.is_null() {
-            None
-        } else {
-            Some(search.found)
-        }
+        list
+    }
+
+    const KNOWN_PROCESSES: [&str; 3] = ["wwm.exe", "yysls.exe", "wherewindsmeet.exe"];
+
+    /// The game's main window: title contains `title_needle`, or the process is one of
+    /// the known game executables (or contains `process_needle`). Largest window wins.
+    pub fn find_window(title_needle: &str, process_needle: Option<&str>) -> Option<HWND> {
+        let title_needle = title_needle.to_lowercase();
+        let process_needle = process_needle.map(|p| p.to_lowercase());
+        list_windows()
+            .into_iter()
+            .filter(|w| {
+                let proc_lc = w.process.to_lowercase();
+                let by_title = !title_needle.is_empty() && w.title.to_lowercase().contains(&title_needle);
+                let by_process = match &process_needle {
+                    Some(p) => !p.is_empty() && proc_lc.contains(p.as_str()),
+                    None => KNOWN_PROCESSES.contains(&proc_lc.as_str()),
+                };
+                by_title || by_process
+            })
+            .max_by_key(|w| w.area)
+            .map(|w| w.hwnd)
     }
 
     pub fn focus_window(hwnd: HWND) -> bool {
@@ -181,8 +230,16 @@ mod platform {
 #[cfg(not(windows))]
 mod platform {
     pub type HWND = *mut core::ffi::c_void;
+    pub struct WindowInfo {
+        pub title: String,
+        pub process: String,
+        pub area: i64,
+    }
     pub fn precise_timers(_on: bool) {}
-    pub fn find_window(_needle: &str) -> Option<HWND> {
+    pub fn list_windows() -> Vec<WindowInfo> {
+        Vec::new()
+    }
+    pub fn find_window(_title: &str, _process: Option<&str>) -> Option<HWND> {
         None
     }
     pub fn focus_window(_hwnd: HWND) -> bool {
@@ -392,7 +449,15 @@ fn spin_sleep(d: Duration) {
 
 fn main() {
     let args = Args::parse();
-    let script = match Script::load(&args.script) {
+    if args.list_windows {
+        println!("{:<28} {:<10} title", "process", "size");
+        for w in platform::list_windows() {
+            println!("{:<28} {:<10} {}", w.process, w.area, w.title);
+        }
+        return;
+    }
+    let script_path = args.script.clone().unwrap_or_default();
+    let script = match Script::load(&script_path) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("error: {e}");
@@ -412,18 +477,22 @@ fn main() {
     let dur = script.duration_ms() / 1000;
     println!(
         "wwm-play: {} ({} onsets, {:02}:{:02}, mode {}, keymap {})",
-        args.script, script.events.len(), dur / 60, dur % 60, script.mode, script.keymap.name
+        script_path, script.events.len(), dur / 60, dur % 60, script.mode, script.keymap.name
     );
 
-    let game = if args.dry_run || !cfg!(windows) { None } else { platform::find_window(&args.window) };
+    let game = if args.dry_run || !cfg!(windows) {
+        None
+    } else {
+        platform::find_window(&args.window, args.process.as_deref())
+    };
     if cfg!(windows) && !args.dry_run {
         match game {
-            Some(_) => println!("game window found: title contains {:?}", args.window),
+            Some(_) => println!("game window found (title {:?} or process {})", args.window, args.process.as_deref().unwrap_or("wwm.exe/yysls.exe")),
             None if args.background => {
-                eprintln!("error: --background needs the game window; no visible window title contains {:?}", args.window);
+                eprintln!("error: --background needs the game window; nothing matched title {:?} or the game process. Run with --list-windows to see names, then pass --process <name>", args.window);
                 std::process::exit(2);
             }
-            None => println!("warning: no window title contains {:?}; keys go to whatever is in front", args.window),
+            None => println!("warning: no window matched title {:?} or the game process; keys go to whatever is in front (--list-windows shows names)", args.window),
         }
     }
 
