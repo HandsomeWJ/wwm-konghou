@@ -34,3 +34,13 @@ def test_probe_reads_modifier_table(tmp_path):
     assert "(natural)" in table[("s", "-")]
     assert "silent" in table[("x", "lshift")]          # low row D
     assert abs(float(lines[0].split()[2].rstrip("s")) - 1.0) < 0.06
+
+
+def test_probe_script_embeds_every_scancode_it_uses():
+    script = probe_script(KeyMap.load(), repeats=1)
+    codes = script["keymap"]["scancodes"]
+    for ev in script["events"]:
+        for g in ev["groups"]:
+            assert g["mod"] is None or g["mod"] in codes, g
+            assert all(k in codes for k in g["keys"]), g
+    assert codes["lctrl"] == 0x1D and codes["lshift"] == 0x2A

@@ -95,7 +95,7 @@ class KeyMap:
 
     def used_keys(self) -> list[str]:
         keys = [k for row in ROW_NAMES for k in self.rows[row]]
-        keys.append(self.sharp_modifier if self.accidental_style == "sharp" else self.flat_modifier)
+        keys.extend([self.sharp_modifier, self.flat_modifier])  # both: probes and flat spellings need Ctrl too
         return keys
 
     def press_for(self, pitch: int) -> KeyPress:
