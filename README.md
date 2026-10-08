@@ -111,6 +111,21 @@ fast G4 repeats (100 ms apart): 8/8 onsets heard
 `wwm verify` works for any script, not only the calibration: it reports the
 percentage of notes heard and lists the misses.
 
+### Probing the accidental layout
+
+If the calibration reports sharps that "produced nothing", the game maps those black
+keys to a different combo (for example E♭ as Ctrl+E rather than D♯ as Shift+D). The
+probe presses every natural key alone, with Shift and with Ctrl, and the reader
+tells you what each combo produced:
+
+```bash
+.venv/bin/wwm probe-script -o out/probe.wwm.json       # on the Mac
+wwm-play.exe probe.wwm.json --record probe.wav          # on the PC, about 70 s
+.venv/bin/wwm probe probe.wav out/probe.wwm.json        # back on the Mac
+```
+
+Edit the keymap's accidental table from the answer and regenerate the scripts.
+
 ### Player options
 
 ```

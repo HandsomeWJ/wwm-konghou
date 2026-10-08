@@ -166,6 +166,38 @@ def merge_cmd(score_midi, recording_midi, out, min_jaccard, min_velocity, musicx
 main.add_command(merge_cmd, name="merge")
 
 
+@main.command("probe-script")
+@click.option("-o", "--out", default="out/probe.wwm.json", show_default=True)
+@click.option("--keymap", "keymap_path", default=None, type=click.Path(exists=True))
+@click.option("--repeats", default=2, show_default=True)
+def probe_script_cmd(out: str, keymap_path: str | None, repeats: int) -> None:
+    """Write a script that presses every natural key alone, with Shift and with Ctrl."""
+    from .probe import probe_script
+
+    script = probe_script(KeyMap.load(keymap_path), repeats=repeats)
+    Path(out).parent.mkdir(parents=True, exist_ok=True)
+    write_script(script, out)
+    click.echo(f"wrote {out} ({len(script['events'])} presses, {script['events'][-1]['t_ms'] / 1000:.0f}s)")
+
+
+@main.command()
+@click.argument("recording", type=click.Path(exists=True, dir_okay=False))
+@click.argument("script", type=click.Path(exists=True, dir_okay=False))
+@click.option("--offset", default=None, type=float)
+def probe(recording: str, script: str, offset: float | None) -> None:
+    """Read a recording of the probe script: which pitch each key+modifier produced."""
+    from .probe import probe_report
+    from .verify import load_audio, load_script
+
+    data = load_script(script)
+    y = load_audio(recording)
+    sidecar = Path(recording + ".json")
+    if offset is None and sidecar.exists():
+        offset = float(json.loads(sidecar.read_text(encoding="utf-8")).get("offset_s", 0.0))
+    for line in probe_report(data, y, offset=offset):
+        click.echo(line)
+
+
 @main.command()
 @click.argument("recording", type=click.Path(exists=True, dir_okay=False))
 @click.argument("script", type=click.Path(exists=True, dir_okay=False))

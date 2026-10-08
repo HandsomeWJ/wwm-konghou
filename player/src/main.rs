@@ -411,10 +411,11 @@ impl<'a> Player<'a> {
         }
     }
 
-    fn run(&mut self, events: &[&Event], lead_in: Duration) -> Flow {
+    fn run(&mut self, events: &[&Event], lead_in: Duration, clock_zero: Instant) -> (Flow, Option<f64>) {
         let first_ms = events.first().map(|e| e.t_ms).unwrap_or(0);
         let mut origin = Instant::now() + lead_in;
         let total = events.len();
+        let mut first_sent: Option<f64> = None;
         for (i, ev) in events.iter().enumerate() {
             let has_natural = ev.groups.iter().any(|g| g.modifier.is_none());
             let has_modifier = ev.groups.iter().any(|g| g.modifier.is_some());
@@ -426,7 +427,10 @@ impl<'a> Player<'a> {
             origin += paused;
             if let Flow::Stop = flow {
                 self.release_all();
-                return Flow::Stop;
+                return (Flow::Stop, first_sent);
+            }
+            if first_sent.is_none() {
+                first_sent = Some(clock_zero.elapsed().as_secs_f64());
             }
             self.play_event(ev);
             if i % 8 == 0 || i + 1 == total {
@@ -439,7 +443,7 @@ impl<'a> Player<'a> {
         let (flow, _) = self.wait_until(end + Duration::from_millis(5));
         self.release_all();
         println!();
-        flow
+        (flow, first_sent)
     }
 }
 
@@ -586,7 +590,12 @@ fn main() {
         println!("starting in {:.0}s ...", lead.as_secs_f64());
     }
     let started = Instant::now();
-    let flow = player.run(&events, lead);
+    #[cfg(windows)]
+    if let Some(r) = &recorder {
+        println!("recorder running for {:.2}s before the clock started", r.elapsed().as_secs_f64());
+    }
+    let (flow, first_sent) = player.run(&events, lead, started);
+    let _ = &first_sent; // only the Windows recorder uses it
     match flow {
         Flow::Stop => println!("stopped after {:.1}s", started.elapsed().as_secs_f64()),
         Flow::Go => println!("done in {:.1}s", started.elapsed().as_secs_f64()),
@@ -602,9 +611,12 @@ fn main() {
                     println!("warning: recording length differs from elapsed time; the capture device may have paused");
                 }
                 let sidecar = format!("{path}.json");
+                // the recorder started a hair before `started`; the first note went out at
+                // `first_sent` after it, which includes any pause while the game was not in front
                 let meta = serde_json::json!({
                     "script": script_path,
-                    "offset_s": lead.as_secs_f64(),
+                    "offset_s": first_sent.unwrap_or(lead.as_secs_f64()),
+                    "lead_in_s": lead.as_secs_f64(),
                     "speed": args.speed,
                     "seconds": secs,
                     "stopped_early": matches!(flow, Flow::Stop),

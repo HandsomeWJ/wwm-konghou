@@ -106,6 +106,10 @@ impl Recorder {
         })
     }
 
+    pub fn elapsed(&self) -> std::time::Duration {
+        self.started.elapsed()
+    }
+
     /// Stop, downmix to mono and write a 16-bit WAV. Returns (seconds recorded, seconds elapsed).
     pub fn finish(self, path: &str) -> Result<(f64, f64), String> {
         let elapsed = self.started.elapsed().as_secs_f64();

@@ -53,7 +53,7 @@ def test_missing_sharps_detected(tmp_path, script):
     rep = verify(script, y)
     lines = calibration_summary(rep, y)
     assert "sharps 0/15" in lines[0]
-    assert any("sharps not heard" in l for l in lines)
+    assert any("sharps that" in l for l in lines)
     assert any("C-E-G# chord" in l and "0/2" in l for l in lines)
 
 
