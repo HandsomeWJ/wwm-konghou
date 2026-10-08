@@ -52,6 +52,32 @@ wwm-play.exe song.wwm.json
 folded by an octave, how many accidentals it met and how many notes it dropped to
 respect the voice limit or the per-key re-trigger gap.
 
+### Rolled chords and key regions (36-key mode)
+
+The player sends a chord as key groups: naturals, then Shift notes, then Ctrl
+notes, about 50 ms apart. A chord that needs two groups rolls slightly; three
+groups roll for 100 ms and sound messy. Keys with many flats (G♭ major has five)
+produce such chords constantly. `wwm arrange` therefore:
+
+- picks the transposition **per key region** (`--segments`, default on): a region
+  is re-keyed only when it is full of multi-group chords, so a verse in G♭ may move
+  to F while the G major chorus stays put. The report prints the regions.
+- caps chords at `--max-groups 2` by dropping inner notes (melody and bass stay).
+  `--max-groups 1` never rolls a chord at all, at the cost of chord colour.
+
+### Following the recording's tempo
+
+A score-based or merged MIDI runs at the printed tempo, metronomically. To make it
+breathe like the pianist:
+
+```bash
+.venv/bin/wwm retime out/song.merged.mid out/song_from_mp3.mid -o out/song.final.mid
+.venv/bin/wwm arrange out/song.final.mid
+```
+
+Every chord both sources agree on becomes a fixed point; times in between are
+interpolated, so the result keeps the recording's tempo changes and rubato.
+
 ### Modes
 
 - `--mode 36` (default): naturals on the keys, sharps as Shift + the natural below.

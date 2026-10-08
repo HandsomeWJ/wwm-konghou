@@ -41,6 +41,72 @@ class MergeReport:
         return out
 
 
+def anchor_pairs(S: list[Chord], R: list[Chord], min_jaccard: float = 0.5, band: int = 120) -> list[tuple[int, int]]:
+    """(score chord index, recording chord index) pairs where both sources agree. A
+    chord of two or more notes anchors on its own; a single note only with an agreeing
+    neighbour, so runs cannot be pinned note by note to the wrong run."""
+    path = dtw_path(R, S, band)
+    best = best_matches(R, S, path)
+
+    def strong(j: int) -> bool:
+        i, jac = best.get(j, (-1, 0.0))
+        if jac < min_jaccard:
+            return False
+        if len(S[j].pitches) >= 2 and len(R[i].pitches) >= 2:
+            return True
+        for dj in (-1, 1):
+            k = j + dj
+            if 0 <= k < len(S):
+                ik, jk = best.get(k, (-1, 0.0))
+                if ik == i + dj and jk >= min_jaccard:
+                    return True
+        return False
+
+    anchors: list[tuple[int, int]] = []
+    last_i = -1
+    for j in range(len(S)):
+        if strong(j) and best[j][0] > last_i:
+            anchors.append((j, best[j][0]))
+            last_i = best[j][0]
+    return anchors
+
+
+def retime(score: list[Note], recording: list[Note], min_jaccard: float = 0.5, window: float = 0.03,
+           min_velocity: int = 30, band: int = 120) -> tuple[list[Note], int]:
+    """Move notes from the score's timeline onto the recording's: every agreeing chord
+    is a fixed point, times in between are interpolated, so the result follows the
+    pianist's tempo and rubato while keeping the score's (or merged) notes."""
+    import numpy as np
+
+    recording = [n for n in recording if n.vel >= min_velocity]
+    S, R = to_chords(score, window), to_chords(recording, window)
+    anchors = anchor_pairs(S, R, min_jaccard, band)
+    if len(anchors) < 2:
+        return list(score), len(anchors)
+    xs = np.array([S[j].t for j, _ in anchors])
+    ys = np.array([R[i].t for _, i in anchors])
+    keep = np.concatenate([[True], np.diff(xs) > 1e-6])  # strictly increasing for interp
+    xs, ys = xs[keep], ys[keep]
+    slope_head = (ys[1] - ys[0]) / (xs[1] - xs[0])
+    slope_tail = (ys[-1] - ys[-2]) / (xs[-1] - xs[-2])
+
+    def f(t: float) -> float:
+        if t <= xs[0]:
+            return ys[0] + (t - xs[0]) * slope_head
+        if t >= xs[-1]:
+            return ys[-1] + (t - xs[-1]) * slope_tail
+        return float(np.interp(t, xs, ys))
+
+    out = []
+    for n in score:
+        t = f(n.t)
+        dur = max(f(n.t + n.dur) - t, 0.05)
+        out.append(Note(t, n.pitch, n.vel, dur))
+    out.sort(key=lambda n: (n.t, n.pitch))
+    t0 = out[0].t if out else 0.0
+    return [Note(n.t - min(t0, 0.0), n.pitch, n.vel, n.dur) for n in out], len(anchors)
+
+
 def _consistent(score_part: list[Chord], rec_part: list[Chord], min_jaccard: float) -> bool:
     if len(score_part) != len(rec_part):
         return False
@@ -64,32 +130,7 @@ def merge(score: list[Note], recording: list[Note], min_jaccard: float = 0.5, wi
     if not S or not R:
         return list(score), report
 
-    path = dtw_path(R, S, band)
-    best = best_matches(R, S, path)
-
-    def strong(j: int) -> bool:
-        """A chord of two or more notes that agrees is an anchor on its own; a single
-        note only counts when a neighbouring chord agrees with the neighbouring
-        recording chord too, so runs cannot be pinned note by note to the wrong run."""
-        i, jac = best.get(j, (-1, 0.0))
-        if jac < min_jaccard:
-            return False
-        if len(S[j].pitches) >= 2 and len(R[i].pitches) >= 2:
-            return True
-        for dj in (-1, 1):
-            k = j + dj
-            if 0 <= k < len(S):
-                ik, jk = best.get(k, (-1, 0.0))
-                if ik == i + dj and jk >= min_jaccard:
-                    return True
-        return False
-
-    anchors: list[tuple[int, int]] = []  # (score chord index, recording chord index)
-    last_i = -1
-    for j in range(len(S)):
-        if strong(j) and best[j][0] > last_i:
-            anchors.append((j, best[j][0]))
-            last_i = best[j][0]
+    anchors = anchor_pairs(S, R, min_jaccard, band)
     report.anchors = len(anchors)
     if not anchors:
         return list(score), report

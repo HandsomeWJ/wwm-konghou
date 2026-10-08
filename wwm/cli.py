@@ -43,16 +43,19 @@ def calib(out: str) -> None:
 @click.option("--cluster-ms", default=30, show_default=True, help="Onsets closer than this become one chord")
 @click.option("--min-velocity", default=1, show_default=True, help="Drop notes quieter than this (transcription ghosts)")
 @click.option("--hold-ms", default=20, show_default=True, help="How long the player holds each key")
+@click.option("--segments/--no-segments", default=True, show_default=True, help="36-key: choose the transposition per key region to avoid chords that need Shift and Ctrl at once")
+@click.option("--max-groups", default=2, show_default=True, help="36-key: a chord may need this many key groups (naturals, Shift, Ctrl); inner notes beyond that are dropped. 1 = never roll a chord")
 @click.option("--preview/--no-preview", default=True, show_default=True, help="Also render a WAV to listen to")
-def arrange_cmd(midi, out, mode, voices, transpose, keymap_path, snap, retrigger_ms, cluster_ms, min_velocity, hold_ms, preview) -> None:
+def arrange_cmd(midi, out, mode, voices, transpose, keymap_path, snap, retrigger_ms, cluster_ms, min_velocity, hold_ms, segments, max_groups, preview) -> None:
     """Reduce a MIDI to the Konghou range and write .wwm.mid + .wwm.json (+ preview WAV)."""
     keymap = KeyMap.load(keymap_path)
     opts = ArrangeOptions(
         mode=mode, max_voices=voices, transpose=transpose, snap=snap,
         min_retrigger=retrigger_ms / 1000, cluster_window=cluster_ms / 1000, min_velocity=min_velocity,
+        segment_transpose=segments, max_groups=max_groups,
     )
     notes = load_midi(midi)
-    onsets, report = arrange(notes, opts)
+    onsets, report = arrange(notes, opts, keymap)
     if not onsets:
         raise click.ClickException("no playable notes found")
     stem = Path(out) if out else Path(midi).with_suffix("")
@@ -164,6 +167,21 @@ def merge_cmd(score_midi, recording_midi, out, min_jaccard, min_velocity, musicx
 
 
 main.add_command(merge_cmd, name="merge")
+
+
+@main.command()
+@click.argument("score_midi", type=click.Path(exists=True, dir_okay=False))
+@click.argument("recording_midi", type=click.Path(exists=True, dir_okay=False))
+@click.option("-o", "--out", default=None, help="Output MIDI (default: <score>.retimed.mid)")
+def retime(score_midi, recording_midi, out) -> None:
+    """Move a score (or merged) MIDI onto the recording's timeline: same notes, the pianist's tempo and rubato."""
+    from .export import write_midi
+    from .merge import retime as do_retime
+
+    notes, anchors = do_retime(load_midi(score_midi), load_midi(recording_midi))
+    out_path = Path(out) if out else Path(score_midi).with_suffix(".retimed.mid")
+    write_midi(notes, out_path, clamp=False)
+    click.echo(f"wrote {out_path} ({len(notes)} notes, {anchors} anchors, {notes[-1].t:.1f}s)")
 
 
 @main.command("probe-script")

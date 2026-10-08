@@ -11,7 +11,7 @@ from dataclasses import dataclass, field, replace
 
 import mido
 
-from .keymap import NOTE_MAX, NOTE_MIN, SCALE_PCS
+from .keymap import NOTE_MAX, NOTE_MIN, SCALE_PCS, KeyMap
 
 DRUM_CHANNEL = 9
 
@@ -43,11 +43,19 @@ class ArrangeOptions:
     key_change_penalty: float = 0.05  # 36-key: only leave the original key for a big gain
     lo: int = NOTE_MIN
     hi: int = NOTE_MAX
+    segment_transpose: bool = True  # 36-key: pick the shift per key region, not once for the whole piece
+    segment_window: float = 10.0    # seconds of music each shift decision looks at
+    switch_penalty: float = 40.0    # cost of changing shift between regions, in note units: only a region
+                                    # full of rolled chords is worth re-keying
+    segment_range: tuple[int, int] = (-6, 5)  # one octave of candidates, so a key never recurs an octave apart
+    off_key_cost: float = 0.03      # per note, for any shift other than 0: the original key wins ties
+    max_groups: int = 2             # 36-key: chords needing more key groups lose inner notes (3 groups = a 100 ms roll)
 
 
 @dataclass
 class ArrangeReport:
     transpose: int = 0
+    segments: list[tuple[float, float, int]] = field(default_factory=list)  # (start, end, shift)
     total_notes: int = 0
     in_range: int = 0
     folded: int = 0
@@ -56,19 +64,24 @@ class ArrangeReport:
     dropped_snap: int = 0
     dropped_duplicate: int = 0
     dropped_polyphony: int = 0
+    dropped_groups: int = 0
     dropped_retrigger: int = 0
     kept: int = 0
     duration: float = 0.0
 
     def lines(self) -> list[str]:
+        if self.segments and len(self.segments) > 1:
+            first = "transpose        " + " | ".join(f"{a:.0f}-{b:.0f}s {sh:+d}" for a, b, sh in self.segments)
+        else:
+            first = f"transpose        {self.transpose:+d} semitones"
         return [
-            f"transpose        {self.transpose:+d} semitones",
+            first,
             f"notes in         {self.total_notes}",
             f"  in range       {self.in_range}",
             f"  octave-folded  {self.folded}",
             f"  accidentals    {self.accidentals}" + (f" (snapped {self.snapped}, dropped {self.dropped_snap})" if self.snapped or self.dropped_snap else ""),
             f"  dropped dup    {self.dropped_duplicate}",
-            f"  dropped voices {self.dropped_polyphony}",
+            f"  dropped voices {self.dropped_polyphony}" + (f" (+{self.dropped_groups} to keep chords to {2} key groups)" if self.dropped_groups else ""),
             f"  dropped fast   {self.dropped_retrigger}",
             f"notes out        {self.kept}",
             f"duration         {self.duration:.1f}s",
@@ -119,40 +132,122 @@ def fold(pitch: int, lo: int = NOTE_MIN, hi: int = NOTE_MAX) -> int:
     return pitch
 
 
-def transposition_score(onsets: list[Onset], shift: int, opts: ArrangeOptions) -> float:
-    """Higher is better. Rewards notes that land in range without folding and,
-    in 21-key mode, without accidentals. Melody (top note of a chord) counts 1.5x."""
+GROUP_PENALTY = {0: 0.0, 1: 0.0, 2: 0.6, 3: 1.5, 4: 3.0}  # per onset, in note units
+
+
+def key_groups(pitches: list[int], keymap: KeyMap | None) -> int:
+    """How many key groups the player must send for this chord: naturals count as one,
+    each modifier (Shift, Ctrl) as another. Each extra group is sent ~50 ms later, so
+    chords with two or three groups roll audibly."""
+    if keymap is None:
+        return 1
+    naturals, mods = False, set()
+    for p in pitches:
+        kp = keymap.press_for(p)
+        if kp.modifier is None:
+            naturals = True
+        else:
+            mods.add(kp.modifier)
+    return int(naturals) + len(mods)
+
+
+def transposition_penalty(onsets: list[Onset], shift: int, opts: ArrangeOptions, keymap: KeyMap | None = None) -> tuple[float, float]:
+    """(penalty, weight): lower penalty is better. Penalises folding (melody badly, bass
+    mildly), accidentals (heavily in 21-key mode, mildly in 36-key mode) and, in 36-key
+    mode, chords whose notes need more than one key group."""
     accidental_penalty = 0.9 if opts.mode == "21" else 0.15
-    total = 0.0
+    penalty = 0.0
     weight = 0.0
     for on in onsets:
         pitches = [n.pitch + shift for n in on.notes]
         top = max(pitches)
+        folded = []
         for p in pitches:
             w = 1.5 if p == top else 1.0
-            if opts.lo <= p <= opts.hi:
-                s = 1.0
-            else:  # folding the melody wrecks its contour; folding a bass note is mild
-                s = 0.35 if p == top else 0.8
-            if p % 12 not in SCALE_PCS:
-                s -= accidental_penalty
-            total += w * s
             weight += w
-    score = total / weight if weight else 0.0
+            if not (opts.lo <= p <= opts.hi):
+                penalty += w * (0.65 if p == top else 0.2)
+            q = fold(p, opts.lo, opts.hi)
+            folded.append(q)
+            if q % 12 not in SCALE_PCS:
+                penalty += w * accidental_penalty
+        if opts.mode == "36" and keymap is not None:
+            penalty += GROUP_PENALTY.get(min(key_groups(sorted(set(folded)), keymap), 4), 3.0)
+    return penalty, weight
+
+
+def transposition_score(onsets: list[Onset], shift: int, opts: ArrangeOptions, keymap: KeyMap | None = None) -> float:
+    """Higher is better; kept for callers that compare shifts on a whole piece."""
+    penalty, weight = transposition_penalty(onsets, shift, opts, keymap)
+    score = 1.0 - penalty / weight if weight else 0.0
     score -= 0.002 * abs(shift)
     if opts.mode == "36" and shift % 12 != 0:
         score -= opts.key_change_penalty
     return score
 
 
-def choose_transposition(onsets: list[Onset], opts: ArrangeOptions) -> int:
+def choose_transposition(onsets: list[Onset], opts: ArrangeOptions, keymap: KeyMap | None = None) -> int:
     lo, hi = opts.search_range
     best_shift, best_score = 0, -math.inf
     for shift in sorted(range(lo, hi + 1), key=lambda s: (abs(s), s)):
-        score = transposition_score(onsets, shift, opts)
+        score = transposition_score(onsets, shift, opts, keymap)
         if score > best_score + 1e-9:
             best_shift, best_score = shift, score
     return best_shift
+
+
+def choose_transposition_segments(onsets: list[Onset], opts: ArrangeOptions, keymap: KeyMap) -> list[tuple[float, float, int]]:
+    """Shift per region: the piece is cut into cells of half a window; each cell's cost
+    for every candidate shift is measured over the window around it, and a dynamic
+    programme picks the cheapest path with a penalty for every change of shift.
+    Returns (start, end, shift) segments covering the whole piece."""
+    if not onsets:
+        return []
+    lo, hi = opts.segment_range
+    shifts = list(range(lo, hi + 1))
+    t0, t1 = onsets[0].t, onsets[-1].t
+    hop = opts.segment_window / 2
+    n_cells = max(1, int(math.ceil((t1 - t0) / hop)))
+    cost = [[0.0] * len(shifts) for _ in range(n_cells)]
+    for c in range(n_cells):
+        a = t0 + c * hop - hop / 2
+        b = a + opts.segment_window
+        window = [o for o in onsets if a <= o.t < b]
+        for k, sh in enumerate(shifts):
+            pen, weight = transposition_penalty(window, sh, opts, keymap)
+            if sh != 0:
+                pen += opts.off_key_cost * weight
+            cost[c][k] = pen
+    # Viterbi over cells
+    P = opts.switch_penalty
+    best = [cost[0][:]]
+    back = [[0] * len(shifts)]
+    for c in range(1, n_cells):
+        row, arg = [], []
+        prev = best[-1]
+        stay_min = min(prev)
+        stay_arg = prev.index(stay_min)
+        for k in range(len(shifts)):
+            # cheapest predecessor: itself (no switch) or the global best plus the switch penalty
+            if prev[k] <= stay_min + P:
+                row.append(prev[k] + cost[c][k]); arg.append(k)
+            else:
+                row.append(stay_min + P + cost[c][k]); arg.append(stay_arg)
+        best.append(row); back.append(arg)
+    k = best[-1].index(min(best[-1]))
+    chosen = [0] * n_cells
+    for c in range(n_cells - 1, -1, -1):
+        chosen[c] = shifts[k]
+        k = back[c][k]
+    segments: list[tuple[float, float, int]] = []
+    for c, sh in enumerate(chosen):
+        start = t0 + c * hop if c else t0
+        end = t0 + (c + 1) * hop if c + 1 < n_cells else t1 + 1.0
+        if segments and segments[-1][2] == sh:
+            segments[-1] = (segments[-1][0], end, sh)
+        else:
+            segments.append((start, end, sh))
+    return segments
 
 
 def reduce_chord(onset: Onset, shift: int, opts: ArrangeOptions, report: ArrangeReport) -> list[Note]:
@@ -192,23 +287,61 @@ def limit_polyphony(chord: list[Note], max_voices: int) -> list[Note]:
     return chord[: max_voices - 1] + chord[-1:]
 
 
-def arrange(notes: list[Note], opts: ArrangeOptions) -> tuple[list[Onset], ArrangeReport]:
+def limit_groups(chord: list[Note], keymap: KeyMap, max_groups: int) -> tuple[list[Note], int]:
+    """Drop inner notes until the chord needs at most `max_groups` key groups. The top
+    note (melody) and the bass are kept; the smallest modifier group goes first."""
+    if max_groups < 1 or len(chord) <= 1:
+        return chord, 0
+    dropped = 0
+    while key_groups([n.pitch for n in chord], keymap) > max_groups and len(chord) > 1:
+        by_group: dict[str | None, list[Note]] = {}
+        for n in chord:
+            by_group.setdefault(keymap.press_for(n.pitch).modifier, []).append(n)
+        top, bass = chord[0], chord[-1]
+        candidates = [n for n in chord if n is not top and n is not bass]
+        if not candidates:
+            candidates = [n for n in chord if n is not top]
+        if not candidates:
+            break
+        # drop a note from the group with the fewest notes, inner voices first
+        victim = min(candidates, key=lambda n: (len(by_group[keymap.press_for(n.pitch).modifier]), -abs(n.pitch - top.pitch)))
+        chord = [n for n in chord if n is not victim]
+        dropped += 1
+    return chord, dropped
+
+
+def arrange(notes: list[Note], opts: ArrangeOptions, keymap: KeyMap | None = None) -> tuple[list[Onset], ArrangeReport]:
     report = ArrangeReport()
     notes = [n for n in notes if n.vel >= opts.min_velocity]
     report.total_notes = len(notes)
     if not notes:
         return [], report
     onsets = cluster_onsets(notes, opts.cluster_window)
-    shift = opts.transpose if opts.transpose is not None else choose_transposition(onsets, opts)
-    report.transpose = shift
+    if opts.transpose is not None:
+        segments = [(onsets[0].t, onsets[-1].t + 1.0, opts.transpose)]
+    elif opts.mode == "36" and opts.segment_transpose and keymap is not None:
+        segments = choose_transposition_segments(onsets, opts, keymap)
+    else:
+        segments = [(onsets[0].t, onsets[-1].t + 1.0, choose_transposition(onsets, opts, keymap))]
+    report.segments = [(a - onsets[0].t, b - onsets[0].t, sh) for a, b, sh in segments]
+    report.transpose = segments[0][2]
+
+    def shift_at(t: float) -> int:
+        for a, b, sh in segments:
+            if a <= t < b:
+                return sh
+        return segments[-1][2]
 
     t0 = onsets[0].t
     out: list[Onset] = []
     last_hit: dict[int, float] = {}
     for on in onsets:
-        chord = reduce_chord(on, shift, opts, report)
+        chord = reduce_chord(on, shift_at(on.t), opts, report)
         kept = limit_polyphony(chord, opts.max_voices)
         report.dropped_polyphony += len(chord) - len(kept)
+        if opts.mode == "36" and keymap is not None:
+            kept, dropped = limit_groups(kept, keymap, opts.max_groups)
+            report.dropped_groups += dropped
         t = on.t - t0
         playable: list[Note] = []
         for n in kept:

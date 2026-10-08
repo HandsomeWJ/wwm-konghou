@@ -205,3 +205,33 @@ def test_load_midi_skips_drums_and_applies_tempo(tmp_path):
     mid.save(str(tmp_path / "t.mid"))
     notes = load_midi(str(tmp_path / "t.mid"))
     assert [(n.t, n.pitch, round(n.dur, 2)) for n in notes] == [(0.0, 60, 1.0), (2.0, 62, 0.5)]
+
+
+def test_segment_transposition_lifts_a_six_flat_section():
+    # G-flat major chords for 40 s, then G major chords for 40 s
+    gb = [[66, 70, 73], [71, 63, 66], [61, 66, 70]]  # Gb Bb Db | Cb Eb Gb | Db Gb Bb
+    g = [[67, 71, 74], [72, 64, 67], [62, 67, 71]]
+    notes = []
+    t = 0.0
+    for sec, chords in ((0, gb), (40, g)):
+        for k in range(80):
+            for p in chords[k % 3]:
+                notes.append(Note(sec + k * 0.5, p))
+    km = KeyMap.load()
+    out, rep = arrange(notes, ArrangeOptions(mode="36"), km)
+    assert len(rep.segments) >= 2
+    first, last = rep.segments[0][2], rep.segments[-1][2]
+    assert first != 0 and last == 0  # the flat section moves to a key with fewer mixed chords, G major stays
+    from wwm.arrange import key_groups
+    groups = [key_groups([n.pitch for n in o.notes], km) for o in out if o.t < 40]
+    assert sum(gr >= 2 for gr in groups) / len(groups) < 0.5
+
+
+def test_limit_groups_drops_inner_note_of_three_group_chord():
+    from wwm.arrange import key_groups, limit_groups
+    km = KeyMap.load()
+    chord = sorted(notes_at([70, 66, 64, 60]), key=lambda n: -n.pitch)  # Bb4(Ctrl) F#4(Shift) E4 C4
+    assert key_groups([n.pitch for n in chord], km) == 3
+    kept, dropped = limit_groups(chord, km, 2)
+    assert dropped == 1 and key_groups([n.pitch for n in kept], km) == 2
+    assert kept[0].pitch == 70 and kept[-1].pitch == 60  # melody and bass survive

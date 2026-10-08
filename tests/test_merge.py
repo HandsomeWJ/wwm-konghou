@@ -44,3 +44,16 @@ def test_merge_keeps_consistent_score_untouched():
     merged, rep = merge(truth, recording)
     assert rep.patches == []
     assert sorted((round(n.t, 3), n.pitch) for n in merged) == sorted((round(n.t, 3), n.pitch) for n in truth)
+
+
+def test_retime_follows_recording_timing():
+    from wwm.merge import retime
+
+    truth = truth_piece()
+    # recording: same notes, slower by 20% and with an offset
+    recording = [Note(1.0 + n.t * 1.2, n.pitch, n.vel, n.dur) for n in truth]
+    out, anchors = retime(truth, recording)
+    assert anchors > 30
+    pairs = sorted(zip([n.t for n in sorted(truth, key=lambda n: (n.t, n.pitch))], [n.t for n in out]))
+    for t_score, t_out in pairs[4:-4]:
+        assert abs(t_out - (1.0 + t_score * 1.2)) < 0.03
