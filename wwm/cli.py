@@ -103,8 +103,8 @@ def transcribe(audio: str, out: str | None, device: str) -> None:
 @click.argument("score", type=click.Path(exists=True, dir_okay=False))
 @click.option("-o", "--out", default=None, help="MIDI path (default: next to the score)")
 @click.option("--engine", type=click.Choice(["auto", "audiveris", "homr"]), default="auto", show_default=True, help="auto = Audiveris for PDFs, homr for images")
-@click.option("--bpm", default=None, type=float, help="Override the tempo (scores often carry none; default 120)")
-def omr(score: str, out: str | None, engine: str, bpm: float | None) -> None:
+@click.option("--bpm", default=None, help="Quarter-note tempo, or a map 'measure:bpm,...' (OMR never reads tempo marks; default 120)")
+def omr(score: str, out: str | None, engine: str, bpm: str | None) -> None:
     """Read a PDF or image of a piano score and write MIDI (+ MusicXML for fixes)."""
     from .omr import recognise
 
@@ -116,8 +116,8 @@ def omr(score: str, out: str | None, engine: str, bpm: float | None) -> None:
 @main.command()
 @click.argument("musicxml", type=click.Path(exists=True, dir_okay=False))
 @click.option("-o", "--out", default=None, help="MIDI path (default: next to the MusicXML)")
-@click.option("--bpm", default=None, type=float, help="Tempo in quarter notes per minute (a dotted-quarter mark of 75 in 6/8 is 112.5)")
-def xml2mid(musicxml: str, out: str | None, bpm: float | None) -> None:
+@click.option("--bpm", default=None, help="Quarter-note tempo or a map 'measure:bpm,...' (a dotted-quarter 75 in 6/8 is 112.5)")
+def xml2mid(musicxml: str, out: str | None, bpm: str | None) -> None:
     """Convert a MusicXML file (e.g. fixed in MuseScore) to MIDI."""
     from .omr import musicxml_to_midi
 

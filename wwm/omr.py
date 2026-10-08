@@ -101,35 +101,158 @@ def run_homr(inputs: list[Path], workdir: Path) -> list[Path]:
     return outputs
 
 
-def musicxml_to_midi(xml_paths: list[Path], midi_out: Path, bpm: float | None = None) -> tuple[int, Path]:
-    """Concatenate pages in order, write MIDI; returns (note count, merged MusicXML path)."""
-    from music21 import converter, stream, tempo
+def parse_tempo_map(spec: str | float | None) -> dict[int, float] | None:
+    """'1:112.5,34:87,46:110' -> {measure: quarter BPM from that measure on}; a bare number is measure 1."""
+    if spec is None:
+        return None
+    if isinstance(spec, (int, float)):
+        return {1: float(spec)}
+    out: dict[int, float] = {}
+    for item in str(spec).split(","):
+        item = item.strip()
+        if not item:
+            continue
+        if ":" in item:
+            m, b = item.split(":", 1)
+            out[int(m)] = float(b)
+        else:
+            out[1] = float(item)
+    return out or None
 
-    scores = [converter.parse(str(p)) for p in xml_paths]
-    score = scores[0]
-    for extra in scores[1:]:  # pages: append measures of each part
-        for part, extra_part in zip(score.parts, extra.parts):
-            offset = part.highestTime
-            for m in extra_part.getElementsByClass(stream.Measure):
-                part.insert(offset + m.offset, m)
+
+def score_notes(score, tempo_map: dict[int, float] | None):
+    """Flatten a music21 score to Note events in seconds without makeNotation (which
+    chokes on OMR voice numbering). Tempo: the explicit map by measure number, else the
+    score's metronome marks, else 120 quarter BPM."""
+    from music21 import stream, tempo as m21tempo
+
+    from .arrange import Note
+
     try:
         expanded = score.expandRepeats()
         if expanded is not None:
             score = expanded
     except Exception:
         pass
-    if bpm:
-        for mm in list(score.recurse().getElementsByClass(tempo.MetronomeMark)):
-            mm.activeSite.remove(mm)
-        score.insert(0, tempo.MetronomeMark(number=bpm))
-    note_count = sum(len(n.pitches) for n in score.recurse().notes)
-    merged = midi_out.with_suffix(".musicxml")
-    score.write("musicxml", fp=str(merged))
-    score.write("midi", fp=str(midi_out))
-    return note_count, merged
+
+    # tempo segments as (offset in quarter lengths, quarter BPM)
+    segments: list[tuple[float, float]] = []
+    if tempo_map:
+        measure_offsets: dict[int, float] = {}
+        for part in score.parts or [score]:
+            for m in part.getElementsByClass(stream.Measure):
+                if m.number not in measure_offsets:
+                    measure_offsets[m.number] = m.getOffsetInHierarchy(score)
+        for measure, bpm in sorted(tempo_map.items()):
+            off = measure_offsets.get(measure)
+            if off is None:
+                nearest = min(measure_offsets, key=lambda k: abs(k - measure), default=None)
+                off = measure_offsets.get(nearest, 0.0) if nearest is not None else 0.0
+            segments.append((off, bpm))
+    else:
+        for mm in score.recurse().getElementsByClass(m21tempo.MetronomeMark):
+            q = mm.getQuarterBPM() if hasattr(mm, "getQuarterBPM") else mm.number
+            if q:
+                segments.append((mm.getOffsetInHierarchy(score), float(q)))
+    segments.sort()
+    if not segments or segments[0][0] > 0:
+        segments.insert(0, (0.0, segments[0][1] if segments else 120.0))
+
+    def seconds(ql: float) -> float:
+        total = 0.0
+        for i, (off, bpm) in enumerate(segments):
+            nxt = segments[i + 1][0] if i + 1 < len(segments) else float("inf")
+            if ql <= off:
+                break
+            total += (min(ql, nxt) - off) * 60.0 / bpm
+        return total
+
+    notes: list[Note] = []
+    for el in score.recurse().notes:
+        if el.isRest:
+            continue
+        start = el.getOffsetInHierarchy(score)
+        t = seconds(start)
+        dur = max(seconds(start + float(el.duration.quarterLength)) - t, 0.05)
+        vel = el.volume.velocity if el.volume and el.volume.velocity else 80
+        for p in el.pitches:
+            notes.append(Note(t, int(p.midi), int(vel), dur))
+    notes.sort(key=lambda n: (n.t, n.pitch))
+    return notes
 
 
-def recognise(score_path: str, midi_out: str | Path, engine: str = "auto", bpm: float | None = None) -> dict:
+def _score_to_midi(score, midi_out: Path, tempo_map: dict[int, float] | None) -> int:
+    from .export import write_midi
+
+    notes = score_notes(score, tempo_map)
+    write_midi(notes, midi_out, clamp=False)
+    return len(notes)
+
+
+def _concat_midis(parts: list[Path], midi_out: Path) -> int:
+    """Join per-page MIDIs end to end, keeping pitches, velocities and durations."""
+    from .arrange import Note, load_midi
+    from .export import write_midi
+
+    merged: list[Note] = []
+    offset = 0.0
+    for p in parts:
+        notes = load_midi(str(p))
+        merged.extend(Note(n.t + offset, n.pitch, n.vel, n.dur) for n in notes)
+        if notes:
+            offset += max(n.t + n.dur for n in notes)
+    write_midi(merged, midi_out, clamp=False)
+    return len(merged)
+
+
+def _export_musicxml(score, src: Path, dest: Path) -> Path:
+    """Write the fix-up MusicXML; if music21 cannot re-export the OMR output, keep the
+    engine's own file (MuseScore opens .mxl and .musicxml alike)."""
+    try:
+        score.write("musicxml", fp=str(dest))
+        return dest
+    except Exception:
+        fallback = dest.with_suffix(src.suffix)
+        shutil.copyfile(src, fallback)
+        return fallback
+
+
+def musicxml_to_midi(xml_paths: list[Path], midi_out: Path, bpm: float | str | None = None) -> tuple[int, Path]:
+    """Write MIDI from one or more MusicXML pages; returns (note count, MusicXML path for fixes).
+
+    `bpm` is a quarter-note tempo or a tempo map 'measure:bpm,measure:bpm'. Several
+    pages are merged into one score when music21 can; otherwise each page becomes a
+    MIDI and the MIDIs are concatenated."""
+    from music21 import converter, stream
+
+    tempo_map = parse_tempo_map(bpm)
+    if len(xml_paths) == 1:
+        score = converter.parse(str(xml_paths[0]))
+        fixup = _export_musicxml(score, xml_paths[0], midi_out.with_suffix(".musicxml"))
+        return _score_to_midi(score, midi_out, tempo_map), fixup
+
+    scores = [converter.parse(str(p)) for p in xml_paths]
+    try:
+        score = scores[0]
+        for extra in scores[1:]:
+            for part, extra_part in zip(score.parts, extra.parts):
+                offset = part.highestTime
+                for m in extra_part.getElementsByClass(stream.Measure):
+                    part.insert(offset + m.offset, m)
+        count = _score_to_midi(score, midi_out, tempo_map)
+        fixup = _export_musicxml(score, xml_paths[0], midi_out.with_suffix(".musicxml"))
+        return count, fixup
+    except Exception as exc:  # fall back to page-wise MIDI
+        print(f"page merge failed ({type(exc).__name__}); concatenating per-page MIDI", file=sys.stderr)
+        page_mids = []
+        for i, sc in enumerate(scores):
+            pm = midi_out.with_name(f"{midi_out.stem}-page{i + 1}.mid")
+            _score_to_midi(sc, pm, tempo_map)
+            page_mids.append(pm)
+        return _concat_midis(page_mids, midi_out), xml_paths[0]
+
+
+def recognise(score_path: str, midi_out: str | Path, engine: str = "auto", bpm: float | str | None = None) -> dict:
     src = Path(score_path)
     midi_out = Path(midi_out)
     workdir = midi_out.parent / f"{midi_out.stem}.omr"

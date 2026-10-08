@@ -30,10 +30,41 @@ impl Keyboard for DryRun {
 #[cfg(windows)]
 pub mod win {
     use super::Keyboard;
+    use windows_sys::Win32::Foundation::HWND;
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP,
-        KEYEVENTF_SCANCODE,
+        MapVirtualKeyW, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY,
+        KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE, MAPVK_VSC_TO_VK_EX,
     };
+    use windows_sys::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_KEYDOWN, WM_KEYUP};
+
+    /// Background mode: key messages posted straight to the game window, so it
+    /// need not be in front. Works for games that read WM_KEYDOWN/WM_KEYUP; a game
+    /// that polls the keyboard state or raw input ignores these.
+    pub struct WindowMessages {
+        pub hwnd: HWND,
+    }
+
+    impl Keyboard for WindowMessages {
+        fn send(&mut self, keys: &[(u16, bool)]) {
+            for &(sc, down) in keys {
+                let extended = sc & 0xE000 == 0xE000;
+                let code = (sc & 0xFF) as u32;
+                let vk = unsafe { MapVirtualKeyW(if extended { 0xE000 | code } else { code }, MAPVK_VSC_TO_VK_EX) };
+                let mut lparam: usize = 1 | (code as usize) << 16;
+                if extended {
+                    lparam |= 1 << 24;
+                }
+                if !down {
+                    lparam |= (1 << 30) | (1 << 31);
+                }
+                let msg = if down { WM_KEYDOWN } else { WM_KEYUP };
+                let ok = unsafe { PostMessageW(self.hwnd, msg, vk as usize, lparam as isize) };
+                if ok == 0 {
+                    eprintln!("warning: PostMessage failed for scan code {sc:#04x} (window gone?)");
+                }
+            }
+        }
+    }
 
     pub struct ScanCodes;
 

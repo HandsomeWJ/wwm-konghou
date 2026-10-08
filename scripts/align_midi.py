@@ -53,6 +53,7 @@ def main():
     ap.add_argument("other", help="e.g. the OMR MIDI")
     ap.add_argument("--band", type=int, default=120, help="DTW band in onsets")
     ap.add_argument("--window", type=float, default=0.03)
+    ap.add_argument("--window-secs", type=float, default=20.0, help="size of the per-window coverage report")
     args = ap.parse_args()
     ref, oth = chords(args.reference, args.window), chords(args.other, args.window)
     path = dtw(ref, oth, octave_free=False, band=args.band)
@@ -84,6 +85,21 @@ def main():
     print(f"divergent regions (reference time, >=4 onsets): {len(regions)}")
     for t0, t1, cnt in regions[:25]:
         print(f"  {t0:6.1f}s - {t1:6.1f}s  ({cnt} onsets)")
+
+    # whole-track coverage: match rate per window of reference time
+    win = args.window_secs
+    end = ref[-1][0] if ref else 0.0
+    print(f"match rate per {win:.0f}s window of the reference (exact / pitch-class):")
+    k = 0
+    while k * win <= end:
+        idx = [i for i, (t, _) in enumerate(ref) if k * win <= t < (k + 1) * win]
+        n_notes = sum(len(ref[i][1]) for i in idx)
+        if n_notes:
+            ex = sum(hits_per_ref.get(i, [0, 0])[0] for i in idx) / n_notes
+            pc = sum(hits_per_ref.get(i, [0, 0])[1] for i in idx) / n_notes
+            bar = "#" * int(round(ex * 20))
+            print(f"  {k * win:5.0f}-{(k + 1) * win:4.0f}s  {ex:4.0%} / {pc:4.0%}  {bar:<20} ({n_notes} notes)")
+        k += 1
 
 
 if __name__ == "__main__":

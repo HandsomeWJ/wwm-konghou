@@ -31,9 +31,18 @@ struct Args {
     /// Skip into the song by this many seconds
     #[arg(long, default_value_t = 0.0)]
     start_at: f64,
-    /// Bring the window whose title contains this text to the front before playing
+    /// Game window title (substring, case-insensitive) used by --focus, --background and the foreground guard
+    #[arg(long, default_value = "Where Winds Meet")]
+    window: String,
+    /// Bring the game window to the front before playing
     #[arg(long)]
-    focus: Option<String>,
+    focus: bool,
+    /// Post key messages to the game window instead of the foreground app, so the game can stay in the background
+    #[arg(long)]
+    background: bool,
+    /// Keep sending even when the game window is not in front (default: auto-pause so keys never land in another app)
+    #[arg(long)]
+    no_guard: bool,
     /// Start immediately instead of waiting for F8
     #[arg(long)]
     now: bool,
@@ -43,6 +52,7 @@ struct Args {
 }
 
 #[derive(PartialEq, Clone, Copy)]
+#[allow(dead_code)] // the non-Windows build never produces hotkeys
 enum Hot {
     Toggle,
     Stop,
@@ -100,11 +110,13 @@ mod hotkeys {
 
 #[cfg(windows)]
 mod platform {
-    use windows_sys::Win32::Foundation::{BOOL, HWND, LPARAM};
+    pub use windows_sys::Win32::Foundation::HWND;
+    use windows_sys::Win32::Foundation::{BOOL, LPARAM};
     use windows_sys::Win32::Media::{timeBeginPeriod, timeEndPeriod};
     use windows_sys::Win32::System::Threading::{GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_TIME_CRITICAL};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, GetWindowTextW, IsIconic, IsWindowVisible, SetForegroundWindow, ShowWindow, SW_RESTORE,
+        EnumWindows, GetForegroundWindow, GetWindowTextW, IsIconic, IsWindowVisible, SetForegroundWindow, ShowWindow,
+        SW_RESTORE,
     };
 
     pub fn precise_timers(on: bool) {
@@ -140,26 +152,44 @@ mod platform {
         1
     }
 
-    pub fn focus_window(needle: &str) -> bool {
+    pub fn find_window(needle: &str) -> Option<HWND> {
         let mut search = Search { needle: needle.to_lowercase(), found: std::ptr::null_mut() };
         unsafe {
             EnumWindows(Some(visit), &mut search as *mut Search as LPARAM);
-            if search.found.is_null() {
-                return false;
-            }
-            if IsIconic(search.found) != 0 {
-                ShowWindow(search.found, SW_RESTORE);
-            }
-            SetForegroundWindow(search.found) != 0
         }
+        if search.found.is_null() {
+            None
+        } else {
+            Some(search.found)
+        }
+    }
+
+    pub fn focus_window(hwnd: HWND) -> bool {
+        unsafe {
+            if IsIconic(hwnd) != 0 {
+                ShowWindow(hwnd, SW_RESTORE);
+            }
+            SetForegroundWindow(hwnd) != 0
+        }
+    }
+
+    pub fn is_foreground(hwnd: HWND) -> bool {
+        unsafe { GetForegroundWindow() == hwnd }
     }
 }
 
 #[cfg(not(windows))]
 mod platform {
+    pub type HWND = *mut core::ffi::c_void;
     pub fn precise_timers(_on: bool) {}
-    pub fn focus_window(_needle: &str) -> bool {
+    pub fn find_window(_needle: &str) -> Option<HWND> {
+        None
+    }
+    pub fn focus_window(_hwnd: HWND) -> bool {
         false
+    }
+    pub fn is_foreground(_hwnd: HWND) -> bool {
+        true
     }
 }
 
@@ -177,6 +207,8 @@ struct Player<'a> {
     hold: Duration,
     settle: Duration,
     speed: f64,
+    /// When set, playback auto-pauses while this window is not in front.
+    guard: Option<platform::HWND>,
 }
 
 enum Flow {
@@ -219,7 +251,9 @@ impl<'a> Player<'a> {
         loop {
             let now = Instant::now();
             self.release_due(now);
-            match self.hot.poll() {
+            let hot = self.hot.poll();
+            let lost_focus = matches!(self.guard, Some(h) if !platform::is_foreground(h));
+            match hot {
                 Some(Hot::Stop) => return (Flow::Stop, paused_total),
                 Some(Hot::Toggle) => {
                     self.release_all();
@@ -233,7 +267,24 @@ impl<'a> Player<'a> {
                             None => {}
                         }
                     }
-                    paused_total += pause_start.elapsed();
+                    paused_total += pause_total_since(pause_start);
+                    println!("resumed");
+                }
+                None if lost_focus => {
+                    self.release_all();
+                    let pause_start = Instant::now();
+                    println!("game window not in front: paused (click into the game to resume, F9 to stop)");
+                    loop {
+                        std::thread::sleep(Duration::from_millis(50));
+                        if let Some(Hot::Stop) = self.hot.poll() {
+                            return (Flow::Stop, paused_total);
+                        }
+                        if matches!(self.guard, Some(h) if platform::is_foreground(h)) {
+                            break;
+                        }
+                    }
+                    std::thread::sleep(Duration::from_millis(300)); // let the click that refocused the game settle
+                    paused_total += pause_total_since(pause_start);
                     println!("resumed");
                 }
                 None => {}
@@ -325,6 +376,10 @@ impl<'a> Player<'a> {
     }
 }
 
+fn pause_total_since(start: Instant) -> Duration {
+    start.elapsed()
+}
+
 fn spin_sleep(d: Duration) {
     let target = Instant::now() + d;
     if d > Duration::from_millis(3) {
@@ -360,6 +415,18 @@ fn main() {
         args.script, script.events.len(), dur / 60, dur % 60, script.mode, script.keymap.name
     );
 
+    let game = if args.dry_run || !cfg!(windows) { None } else { platform::find_window(&args.window) };
+    if cfg!(windows) && !args.dry_run {
+        match game {
+            Some(_) => println!("game window found: title contains {:?}", args.window),
+            None if args.background => {
+                eprintln!("error: --background needs the game window; no visible window title contains {:?}", args.window);
+                std::process::exit(2);
+            }
+            None => println!("warning: no window title contains {:?}; keys go to whatever is in front", args.window),
+        }
+    }
+
     let kb: Box<dyn Keyboard> = if args.dry_run || !cfg!(windows) {
         if !args.dry_run {
             println!("not on Windows: dry run only");
@@ -368,7 +435,12 @@ fn main() {
     } else {
         #[cfg(windows)]
         {
-            Box::new(input::win::ScanCodes)
+            if args.background {
+                println!("background mode: posting key messages to the game window");
+                Box::new(input::win::WindowMessages { hwnd: game.unwrap() })
+            } else {
+                Box::new(input::win::ScanCodes)
+            }
         }
         #[cfg(not(windows))]
         {
@@ -376,6 +448,7 @@ fn main() {
         }
     };
 
+    let guard = if args.background || args.no_guard { None } else { game };
     let mut player = Player {
         script: &script,
         kb,
@@ -384,6 +457,7 @@ fn main() {
         hold: Duration::from_millis(args.hold_ms.unwrap_or(script.hold_ms)),
         settle: Duration::from_millis(args.modifier_settle_ms),
         speed: args.speed,
+        guard,
     };
 
     let wait_for_hotkey = cfg!(windows) && !args.now && !args.dry_run;
@@ -398,11 +472,10 @@ fn main() {
             }
         }
     }
-    if let Some(title) = &args.focus {
-        if platform::focus_window(title) {
-            println!("focused window containing {title:?}");
-        } else {
-            println!("warning: no visible window containing {title:?}; alt-tab into the game now");
+    if args.focus {
+        match game {
+            Some(h) if platform::focus_window(h) => println!("brought the game window to the front"),
+            _ => println!("warning: could not focus the game window; alt-tab into the game now"),
         }
     }
     platform::precise_timers(true);
