@@ -47,7 +47,7 @@ class ArrangeOptions:
     segment_window: float = 10.0    # seconds of music each shift decision looks at
     switch_penalty: float = 40.0    # cost of changing shift between regions, in note units: only a region
                                     # full of rolled chords is worth re-keying
-    segment_range: tuple[int, int] = (-6, 5)  # one octave of candidates, so a key never recurs an octave apart
+    segment_range: tuple[int, int] = (-12, 5)  # down to an octave: a high melody may simply drop an octave
     off_key_cost: float = 0.03      # per note, for any shift other than 0: the original key wins ties
     max_groups: int = 2             # 36-key: chords needing more key groups lose inner notes (3 groups = a 100 ms roll)
 
@@ -218,21 +218,18 @@ def choose_transposition_segments(onsets: list[Onset], opts: ArrangeOptions, key
             if sh != 0:
                 pen += opts.off_key_cost * weight
             cost[c][k] = pen
-    # Viterbi over cells
+    # Viterbi over cells; a switch costs P plus 3 per semitone of jump, so two
+    # regions never land on the same key an octave apart
     P = opts.switch_penalty
     best = [cost[0][:]]
     back = [[0] * len(shifts)]
     for c in range(1, n_cells):
         row, arg = [], []
         prev = best[-1]
-        stay_min = min(prev)
-        stay_arg = prev.index(stay_min)
         for k in range(len(shifts)):
-            # cheapest predecessor: itself (no switch) or the global best plus the switch penalty
-            if prev[k] <= stay_min + P:
-                row.append(prev[k] + cost[c][k]); arg.append(k)
-            else:
-                row.append(stay_min + P + cost[c][k]); arg.append(stay_arg)
+            options = [(prev[j] + (0.0 if j == k else P + 3.0 * abs(shifts[j] - shifts[k])), j) for j in range(len(shifts))]
+            val, j = min(options)
+            row.append(val + cost[c][k]); arg.append(j)
         best.append(row); back.append(arg)
     k = best[-1].index(min(best[-1]))
     chosen = [0] * n_cells

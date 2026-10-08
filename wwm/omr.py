@@ -137,9 +137,10 @@ def score_notes(score, tempo_map: dict[int, float] | None):
 
     # tempo segments as (offset in quarter lengths, quarter BPM)
     segments: list[tuple[float, float]] = []
+    parts = list(score.parts) if hasattr(score, "parts") else [score]  # a single Part works too
     if tempo_map:
         measure_offsets: dict[int, float] = {}
-        for part in score.parts or [score]:
+        for part in parts:
             for m in part.getElementsByClass(stream.Measure):
                 if m.number not in measure_offsets:
                     measure_offsets[m.number] = m.getOffsetInHierarchy(score)

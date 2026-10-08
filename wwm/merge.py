@@ -72,17 +72,20 @@ def anchor_pairs(S: list[Chord], R: list[Chord], min_jaccard: float = 0.5, band:
 
 
 def retime(score: list[Note], recording: list[Note], min_jaccard: float = 0.5, window: float = 0.03,
-           min_velocity: int = 30, band: int = 120) -> tuple[list[Note], int]:
+           min_velocity: int = 30, band: int = 120, apply_to: list[Note] | None = None) -> tuple[list[Note], int]:
     """Move notes from the score's timeline onto the recording's: every agreeing chord
     is a fixed point, times in between are interpolated, so the result follows the
-    pianist's tempo and rubato while keeping the score's (or merged) notes."""
+    pianist's tempo and rubato while keeping the score's (or merged) notes. The map is
+    built from `score` and applied to `apply_to` (default: `score` itself), so a
+    melody line can borrow the alignment of the full score it came from."""
     import numpy as np
 
+    target = score if apply_to is None else apply_to
     recording = [n for n in recording if n.vel >= min_velocity]
     S, R = to_chords(score, window), to_chords(recording, window)
     anchors = anchor_pairs(S, R, min_jaccard, band)
     if len(anchors) < 2:
-        return list(score), len(anchors)
+        return list(target), len(anchors)
     xs = np.array([S[j].t for j, _ in anchors])
     ys = np.array([R[i].t for _, i in anchors])
     keep = np.concatenate([[True], np.diff(xs) > 1e-6])  # strictly increasing for interp
@@ -98,7 +101,7 @@ def retime(score: list[Note], recording: list[Note], min_jaccard: float = 0.5, w
         return float(np.interp(t, xs, ys))
 
     out = []
-    for n in score:
+    for n in target:
         t = f(n.t)
         dur = max(f(n.t + n.dur) - t, 0.05)
         out.append(Note(t, n.pitch, n.vel, dur))

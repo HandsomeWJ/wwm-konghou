@@ -170,6 +170,33 @@ main.add_command(merge_cmd, name="merge")
 
 
 @main.command()
+@click.argument("musicxml", type=click.Path(exists=True, dir_okay=False))
+@click.option("-o", "--out", default=None, help="Output MIDI (default: <score>.melody.mid)")
+@click.option("--bpm", default=None, help="Tempo or 'measure:bpm,...' map, as used for the score MIDI")
+@click.option("--staff", default=0, show_default=True, help="Which staff carries the melody (0 = treble)")
+@click.option("--align", "align_midi", default=None, type=click.Path(exists=True), help="Full score or merged MIDI on the same timeline, used to align with the recording")
+@click.option("--recording", "recording_midi", default=None, type=click.Path(exists=True), help="Transcription of the recording: moves the melody onto its timeline and checks every note")
+def melody(musicxml, out, bpm, staff, align_midi, recording_midi) -> None:
+    """Extract the melody (top line of one staff) from a score, optionally timed and checked against a recording."""
+    from .export import write_midi
+    from .melody import melody_from_score
+    from .omr import parse_tempo_map
+
+    align = load_midi(align_midi) if align_midi else None
+    rec = load_midi(recording_midi) if recording_midi else None
+    if (align is None) != (rec is None):
+        raise click.ClickException("--align and --recording go together")
+    notes, report, anchors = melody_from_score(musicxml, parse_tempo_map(bpm), align, rec, part_index=staff)
+    out_path = Path(out) if out else Path(musicxml).with_suffix(".melody.mid")
+    write_midi(notes, out_path, clamp=False)
+    if report:
+        for line in report.lines():
+            click.echo(line)
+        click.echo(f"aligned through {anchors} anchors")
+    click.echo(f"wrote {out_path} ({len(notes)} notes, {notes[-1].t:.1f}s)")
+
+
+@main.command()
 @click.argument("score_midi", type=click.Path(exists=True, dir_okay=False))
 @click.argument("recording_midi", type=click.Path(exists=True, dir_okay=False))
 @click.option("-o", "--out", default=None, help="Output MIDI (default: <score>.retimed.mid)")

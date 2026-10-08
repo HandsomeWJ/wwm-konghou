@@ -78,6 +78,22 @@ breathe like the pianist:
 Every chord both sources agree on becomes a fixed point; times in between are
 interpolated, so the result keeps the recording's tempo changes and rubato.
 
+### Melody only
+
+A sustaining harp turns dense piano accompaniment into a wash. For a clean
+single line, take the top of the score's treble staff, move it onto the
+recording's timeline and let the transcription check every note (exact matches
+kept, octave misreads fixed, contradicted notes replaced by the recording's top
+note nearby):
+
+```bash
+.venv/bin/wwm melody out/song.omr/song.mxl --bpm "1:112.5,32:87,44:110" \
+    --align out/song.merged.mid --recording out/song_from_mp3.mid -o out/song.melody.mid
+.venv/bin/wwm arrange out/song.melody.mid --voices 1
+```
+
+`--staff 1` takes the bass staff instead, for a bass-only line to layer later.
+
 ### Modes
 
 - `--mode 36` (default): naturals on the keys, sharps as Shift + the natural below.
