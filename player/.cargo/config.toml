@@ -1,0 +1,3 @@
+# Static CRT so the exe runs on any Windows 10/11 box without the VC++ redistributable.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
