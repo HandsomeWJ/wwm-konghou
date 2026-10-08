@@ -192,9 +192,10 @@ def probe(recording: str, script: str, offset: float | None) -> None:
     data = load_script(script)
     y = load_audio(recording)
     sidecar = Path(recording + ".json")
+    near = None
     if offset is None and sidecar.exists():
-        offset = float(json.loads(sidecar.read_text(encoding="utf-8")).get("offset_s", 0.0))
-    for line in probe_report(data, y, offset=offset):
+        near = float(json.loads(sidecar.read_text(encoding="utf-8")).get("offset_s", 0.0))
+    for line in probe_report(data, y, offset=offset, near=near):
         click.echo(line)
 
 
@@ -210,11 +211,12 @@ def verify(recording: str, script: str, offset: float | None, verbose: bool) -> 
     data = load_script(script)
     y = load_audio(recording)
     sidecar = Path(recording + ".json")
+    near = None
     if offset is None and sidecar.exists():
         meta = json.loads(sidecar.read_text(encoding="utf-8"))
-        offset = float(meta.get("offset_s", 0.0))
-        click.echo(f"using offset {offset:.2f}s from {sidecar.name}")
-    report = run_verify(data, y, offset=offset)
+        near = float(meta.get("offset_s", 0.0))
+        click.echo(f"recorder says the first key went out {near:.2f}s in; refining for audio latency")
+    report = run_verify(data, y, offset=offset, near=near)
     for line in report_lines(report, verbose):
         click.echo(line)
     summary = calibration_summary(report, y)

@@ -114,7 +114,9 @@ fast G4 repeats (100 ms apart): 8/8 onsets heard
 ```
 
 `wwm verify` works for any script, not only the calibration: it reports the
-percentage of notes heard and lists the misses.
+percentage of notes heard and lists the misses. On the real Konghou (2026-10-09,
+second calibration, settle 50 ms) it read 73/73: every natural, every sharp and
+flat, both chords, all eight fast repeats and the whole run.
 
 ### Probing the accidental layout
 
@@ -134,7 +136,7 @@ Edit the keymap's accidental table from the answer and regenerate the scripts.
 ### Player options
 
 ```
-wwm-play.exe song.wwm.json [--speed 1.0] [--hold-ms 20] [--modifier-settle-ms 25]
+wwm-play.exe song.wwm.json [--speed 1.0] [--hold-ms 20] [--modifier-settle-ms 50]
                            [--lead-in 3] [--start-at 30] [--window "Where Winds Meet"]
                            [--process wwm.exe] [--focus] [--background] [--no-guard]
                            [--record out.wav] [--record-device "<name>"] [--now] [--dry-run]
@@ -155,7 +157,7 @@ wwm-play.exe --list-windows | --list-devices
   window title is fine. `--process <name>` matches any other executable, and
   `--list-windows` prints every visible window with its process name.
 
-- Dropped sharps → raise `--modifier-settle-ms` (25 → 40).
+- Dropped sharps → raise `--modifier-settle-ms` (50 passed the in-game calibration; 25 dropped a few).
 - Missed fast repeats → raise `--retrigger-ms` in `wwm arrange` (40 → 60).
 - Muddy chords → lower `--voices` (4 → 3).
 - Run the exe as administrator if the game does not react at all.

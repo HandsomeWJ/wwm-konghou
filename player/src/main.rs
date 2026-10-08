@@ -24,8 +24,8 @@ struct Args {
     /// Override how long each key is held, in ms (default: value in the script)
     #[arg(long)]
     hold_ms: Option<u64>,
-    /// Delay between pressing Shift/Ctrl and the keys that need it, in ms
-    #[arg(long, default_value_t = 25)]
+    /// Delay between pressing Shift/Ctrl and the keys that need it, in ms (50 passed the in-game calibration; 25 dropped some)
+    #[arg(long, default_value_t = 50)]
     modifier_settle_ms: u64,
     /// Seconds between the start signal and the first note (time to alt-tab into the game)
     #[arg(long, default_value_t = 3.0)]

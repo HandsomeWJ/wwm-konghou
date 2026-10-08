@@ -41,10 +41,11 @@ def probe_script(keymap: KeyMap, repeats: int = 2, spacing: float = 0.7) -> dict
     }
 
 
-def probe_report(script: dict, y: np.ndarray, sr: int = SR, offset: float | None = None) -> list[str]:
+def probe_report(script: dict, y: np.ndarray, sr: int = SR, offset: float | None = None,
+                 near: float | None = None) -> list[str]:
     events = script["events"]
     times = [e["t_ms"] / 1000.0 for e in events]
-    off = find_offset(y, sr, times) if offset is None else offset
+    off = offset if offset is not None else find_offset(y, sr, times, near=near)
     onsets = onset_times(y, sr)
     ref = reference_level(y, sr, [off + t for t in times])
     results: dict[tuple[str, str | None], list[str]] = {}

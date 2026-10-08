@@ -24,6 +24,7 @@ NFFT = 32768
 PEAK_TOL_CENTS = 45.0   # a note is "there" when a spectral peak sits within this of its pitch
 REL_DB = 18.0           # ... and is within this of the loudest peak in the window (G#4's fundamental sits ~16 dB under its octave)
 RISE_DB = 6.0           # ... and rose this much across the onset
+BIG_RISE_DB = 15.0      # a rise this large is proof of a strike even for a quiet note
 NOISE_DB = 12.0         # ... and stands this far above the window's median spectrum
 
 
@@ -116,9 +117,10 @@ def analyse_onset(y: np.ndarray, sr: int, t: float, length: float, before_len: f
     `min_rise` lowers the required rise for pitches that were struck recently and
     still ring (a re-strike of a long-sustain note only holds its level). `ref_level`
     is the take's loudest note; peaks far below it are residue, not notes."""
-    win = min(length, before_len)  # equal windows, so sidelobes compare like for like
-    after, fa = _spectrum(y, sr, t + ANALYSIS_START, win)
-    before, fb = _spectrum(y, sr, t - win - 0.01, win)
+    # the after-window may run longer than the before-window: some notes of this
+    # instrument swell for half a second after the strike instead of jumping
+    after, fa = _spectrum(y, sr, t + ANALYSIS_START, length)
+    before, fb = _spectrum(y, sr, t - before_len - 0.01, before_len)
     if after is None:
         return {p: False for p in pitches}, None
     peaks = _peaks(after, fa)
@@ -137,13 +139,22 @@ def analyse_onset(y: np.ndarray, sr: int, t: float, length: float, before_len: f
         level = max(cands)
         rise = level - _band_max(before, fb, p)
         need = (min_rise or {}).get(p, RISE_DB)
-        present[p] = level >= loudest - REL_DB and level >= floor and rise >= need
+        # a big jump out of silence is a strike whatever its loudness (some notes of
+        # this instrument carry a weak fundamental); otherwise it must also be within
+        # REL_DB of the loudest peak
+        present[p] = level >= floor and rise >= need and (rise >= BIG_RISE_DB or level >= loudest - REL_DB)
+    # "what sounded instead" compares equal-length windows on both sides of the onset,
+    # so sidelobe differences between window lengths can never fake a rise
+    w = min(length, before_len)
+    after_eq, fe = _spectrum(y, sr, t + ANALYSIS_START, w)
+    before_eq, fq = _spectrum(y, sr, t - w - 0.01, w)
     heard, best = None, -1e9
-    for f, db in peaks:
-        p = int(round(69 + 12 * np.log2(f / 440.0)))
-        if NOTE_MIN <= p <= NOTE_MAX and abs(_cents(f, p)) <= PEAK_TOL_CENTS and db >= floor:
-            if db - _band_max(before, fb, p) >= RISE_DB and db > best:
-                best, heard = db, p
+    if after_eq is not None:
+        for f, db in _peaks(after_eq, fe):
+            p = int(round(69 + 12 * np.log2(f / 440.0)))
+            if NOTE_MIN <= p <= NOTE_MAX and abs(_cents(f, p)) <= PEAK_TOL_CENTS and db >= floor:
+                if db - _band_max(before_eq, fq, p) >= RISE_DB and db > best:
+                    best, heard = db, p
     return present, heard
 
 
@@ -168,9 +179,12 @@ def onset_envelope(y: np.ndarray, sr: int, hop: int = 256) -> np.ndarray:
     return librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop)
 
 
-def find_offset(y: np.ndarray, sr: int, event_times: list[float], hop: int = 256) -> float:
+def find_offset(y: np.ndarray, sr: int, event_times: list[float], hop: int = 256,
+                near: float | None = None, window: tuple[float, float] = (-0.1, 0.6)) -> float:
     """Where in the recording the script starts: the shift that best lines up the
-    recording's onset strength with the script's onset pattern."""
+    recording's onset strength with the script's onset pattern. With `near` (the
+    recorder's own timestamp) only shifts within `window` of it are considered, which
+    absorbs the game's input-to-sound latency without risking a wrong match."""
     env = onset_envelope(y, sr, hop)
     env = env / (env.max() + 1e-9)
     frames = len(env)
@@ -184,7 +198,12 @@ def find_offset(y: np.ndarray, sr: int, event_times: list[float], hop: int = 256
     corr = np.correlate(env, pattern, mode="full")[frames - 1 :]  # non-negative shifts only
     span = int(event_times[-1] * sr / hop)
     corr = corr[: max(1, frames - span)]
-    return float(np.argmax(corr) * hop / sr)
+    best = float(np.argmax(corr) * hop / sr)
+    if near is not None and not (near + window[0] <= best <= near + window[1]):
+        # the recorder's timestamp is only wrong when the game was not in front when F8
+        # was pressed (the guard paused); the onset pattern is the stronger evidence
+        print(f"note: recorder said {near:.2f}s, onsets say {best:.2f}s; using the onsets", flush=True)
+    return best
 
 
 @dataclass
@@ -211,10 +230,13 @@ class VerifyReport:
         return sum(len(e.expected) - len(e.missing) for e in self.events)
 
 
-def verify(script: dict, y: np.ndarray, sr: int = SR, offset: float | None = None) -> VerifyReport:
+def verify(script: dict, y: np.ndarray, sr: int = SR, offset: float | None = None,
+           near: float | None = None) -> VerifyReport:
+    """`offset` pins the script start exactly; `near` (e.g. the recorder's sidecar
+    value) seeds a local search that also absorbs the game's audio latency."""
     events = script["events"]
     times = [e["t_ms"] / 1000.0 for e in events]
-    off = find_offset(y, sr, times) if offset is None else offset
+    off = offset if offset is not None else find_offset(y, sr, times, near=near)
     report = VerifyReport(offset=off)
     onsets = onset_times(y, sr)
     ref = reference_level(y, sr, [off + t for t in times])
@@ -224,12 +246,13 @@ def verify(script: dict, y: np.ndarray, sr: int = SR, offset: float | None = Non
         t = off + times[i]
         gap_next = times[i + 1] - times[i] if i + 1 < len(events) else 1.0
         gap_prev = times[i] - times[i - 1] if i > 0 else 1.0
-        length = float(min(0.35, max(0.08, gap_next - 0.02)))
-        before_len = float(min(0.25, max(0.04, gap_prev - 0.02)))
-        onset_ok = bool(len(onsets)) and bool(np.min(np.abs(onsets - t)) <= 0.04)
+        length = float(min(0.6, max(0.08, gap_next - 0.02)))
+        before_len = float(min(0.35, max(0.04, gap_prev - 0.02)))
+        onset_ok = bool(len(onsets)) and bool(np.min(np.abs(onsets - t)) <= 0.08)
         # a pitch struck within the last 1.5 s still rings (this instrument sustains for
-        # seconds): a re-strike only needs to hold its level, provided an onset is there
-        recent = {p: 0.0 for p in expected if times[i] - last_hit.get(p, -9.0) < 1.5} if onset_ok else {}
+        # seconds and loses only ~2 dB over the analysis span): a re-strike only needs
+        # to hold its level, a mere ring keeps falling
+        recent = {p: 0.0 for p in expected if times[i] - last_hit.get(p, -9.0) < 1.5}
         present, heard = analyse_onset(y, sr, t, length, before_len, expected, min_rise=recent, ref_level=ref)
         fast = gap_next < 0.15 or gap_prev < 0.15
         missing = []
