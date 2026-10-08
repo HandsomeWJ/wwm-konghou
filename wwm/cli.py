@@ -102,7 +102,7 @@ def transcribe(audio: str, out: str | None, device: str) -> None:
 @main.command()
 @click.argument("score", type=click.Path(exists=True, dir_okay=False))
 @click.option("-o", "--out", default=None, help="MIDI path (default: next to the score)")
-@click.option("--engine", type=click.Choice(["audiveris", "homr"]), default="audiveris", show_default=True)
+@click.option("--engine", type=click.Choice(["auto", "audiveris", "homr"]), default="auto", show_default=True, help="auto = Audiveris for PDFs, homr for images")
 @click.option("--bpm", default=None, type=float, help="Override the tempo (scores often carry none; default 120)")
 def omr(score: str, out: str | None, engine: str, bpm: float | None) -> None:
     """Read a PDF or image of a piano score and write MIDI (+ MusicXML for fixes)."""

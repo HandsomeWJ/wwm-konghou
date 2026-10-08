@@ -21,15 +21,16 @@ python3.12 -m venv .venv
 
 `[ml]` pulls torch and ByteDance's piano transcription model (the 165 MB checkpoint
 downloads on first use). `[omr]` pulls homr (transformer OMR) and PyMuPDF.
-Audiveris (engraved-score OMR) is optional: install the app into `~/Applications`
-or point `AUDIVERIS` at its binary.
+Audiveris (engraved-score OMR) lives in `~/Applications/Audiveris.app` (or set
+`AUDIVERIS` to its binary). `wwm omr` picks Audiveris for PDFs and homr for
+images unless you pass `--engine`.
 
 ## Workflow
 
 ```bash
 # 1. get a MIDI
 .venv/bin/wwm transcribe song.mp3 -o out/song.mid              # mp3 / wav / flac
-.venv/bin/wwm omr score.pdf --engine homr --bpm 90 -o out/song.mid   # pdf / png / jpg
+.venv/bin/wwm omr score.pdf --bpm 90 -o out/song.mid           # pdf / png / jpg; --engine audiveris|homr
 
 # 2. reduce it to the Konghou's 3 octaves and write the key script
 .venv/bin/wwm arrange out/song.mid --mode 36 --voices 4
@@ -100,6 +101,9 @@ A native `cargo build` gives a Mac binary that only supports `--dry-run`.
 .venv/bin/python scripts/make_test_score.py          # renders a known score with MuseScore
 .venv/bin/python scripts/compare_midi.py out/test_score_truth.mid out/test_score_homr.mid --fit-tempo
 ```
+
+Measured on that fixture (G major, two hands, 36 notes): homr 36/36 on both the
+910 px PNG and the PDF; Audiveris 36/36 on the PDF, 33/36 on the PNG.
 
 ## Risk
 

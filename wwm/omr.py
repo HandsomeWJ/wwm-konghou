@@ -1,9 +1,10 @@
 """Piano score (PDF, PNG, JPG) -> MusicXML -> MIDI.
 
 Engines:
+  auto       Audiveris for PDFs when installed, homr for images (default)
   audiveris  best on clean engraved scores; needs the Audiveris app (AUDIVERIS env
              var or ~/Applications/Audiveris.app)
-  homr       transformer OMR built for photos; `pip install homr`
+  homr       transformer OMR built for photos and screenshots; `pip install homr`
 The MusicXML is kept next to the MIDI so misreads can be fixed in MuseScore and
 re-exported.
 """
@@ -128,11 +129,15 @@ def musicxml_to_midi(xml_paths: list[Path], midi_out: Path, bpm: float | None = 
     return note_count, merged
 
 
-def recognise(score_path: str, midi_out: str | Path, engine: str = "audiveris", bpm: float | None = None) -> dict:
+def recognise(score_path: str, midi_out: str | Path, engine: str = "auto", bpm: float | None = None) -> dict:
     src = Path(score_path)
     midi_out = Path(midi_out)
     workdir = midi_out.parent / f"{midi_out.stem}.omr"
     workdir.mkdir(parents=True, exist_ok=True)
+    if engine == "auto":
+        # measured on the rendered fixture: Audiveris 36/36 on the PDF but 33/36 on the
+        # 910 px screenshot, homr 36/36 on both; homr is slower on multi-page PDFs
+        engine = "audiveris" if src.suffix.lower() == ".pdf" and find_audiveris() else "homr"
 
     if src.suffix.lower() == ".pdf":
         inputs = [src] if engine == "audiveris" else pdf_to_images(src, workdir)
