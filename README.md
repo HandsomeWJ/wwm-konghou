@@ -83,9 +83,13 @@ interpolated, so the result keeps the recording's tempo changes and rubato.
 Dense piano accompaniment, especially repeated chords, piles up on a sustaining
 instrument. `wwm thin` keeps the melody and prunes the rest with four rules:
 
+- a string that would be plucked twice within 0.22 s is swapped, on the second
+  pluck, for the nearest pitch sounding around it: a pianistic shimmer A B B B A E
+  becomes A B A B A E, same harmony and rhythm, no stutter (`--no-refigure` to
+  keep the literal notes);
 - a pianistic figuration (upper register running at 4+ notes/s over 6 or fewer
-  pitches, like sextuplet shimmers) keeps every second onset, so it stays regular
-  at half the density; a slow melody riding on it keeps every note;
+  pitches) can additionally be thinned to every Nth onset (`--figuration-keep 2`);
+  a slow melody riding on it keeps every note;
 - under such a figuration the last bass chord is re-struck whenever the bass has
   been silent for 2.2 s, so the harmony keeps ringing;
 - an accompaniment pitch is not struck again within 0.3 s (the previous strike

@@ -22,6 +22,7 @@ class ThinReport:
     dropped_repeats: int = 0
     dropped_busy: int = 0
     dropped_figuration: int = 0
+    refigured: int = 0
     added_support: int = 0
     per_window: list[tuple[float, int, int]] = field(default_factory=list)  # (start, acc notes before, after)
 
@@ -29,7 +30,8 @@ class ThinReport:
         out = [
             f"melody notes {self.melody}, accompaniment {self.accompaniment}: "
             f"dropped {self.dropped_repeats} re-strikes and {self.dropped_busy} notes under a running melody; "
-            f"figuration thinned by {self.dropped_figuration} notes, {self.added_support} supporting chord strikes added",
+            f"figuration: {self.refigured} fast re-plucks re-voiced to a neighbouring pitch, {self.dropped_figuration} dropped, "
+            f"{self.added_support} supporting chord strikes added",
         ]
         for start, before, after in self.per_window:
             if before:
@@ -70,16 +72,45 @@ def figuration_cells(upper: list[Note], rate: float, max_distinct: int, cell: fl
     return cells
 
 
+def devoice_repeats(onsets, protected, window: float = 0.22, local: float = 0.45) -> tuple[list[Note], int]:
+    """A single-note onset that re-plucks the string just plucked (< `window` s ago)
+    is swapped for the nearest other pitch sounding within ±`local` s, so a shimmer
+    like A B B B A E becomes A B A B A E: same harmony, same rhythm, no stutter."""
+    singles = [(o.t, o.notes[0].pitch) for o in onsets if len(o.notes) == 1]
+    times = [t for t, _ in singles]
+    out: list[Note] = []
+    changed = 0
+    last_t, last_pitch = -1e9, None
+    for o in onsets:
+        if len(o.notes) != 1 or protected(o.t):
+            out.extend(o.notes)
+            last_t, last_pitch = o.t, None
+            continue
+        n = o.notes[0]
+        pitch = n.pitch
+        if last_pitch == pitch and o.t - last_t < window:
+            lo = bisect.bisect_left(times, o.t - local)
+            hi = bisect.bisect_right(times, o.t + local)
+            nearby = {p for _, p in singles[lo:hi]} - {pitch}
+            if nearby:
+                pitch = min(nearby, key=lambda q: (abs(q - n.pitch), q))
+                changed += 1
+        out.append(Note(n.t, pitch, n.vel, n.dur))
+        last_t, last_pitch = o.t, pitch
+    return out, changed
+
+
 def thin(notes: list[Note], melody: list[Note], repeat_window: float = 0.3, busy_gap: float = 0.25,
          busy_rate: float = 5.0, window: float = 0.03,
          protect: list[tuple[float, float]] | None = None,
-         figuration_rate: float = 4.0, figuration_distinct: int = 6, figuration_keep: int = 2,
-         support_gap: float = 2.2) -> tuple[list[Note], ThinReport]:
+         figuration_rate: float = 4.0, figuration_distinct: int = 6, figuration_keep: int = 1,
+         support_gap: float = 2.2, refigure_shimmer: bool = True) -> tuple[list[Note], ThinReport]:
     """`protect` lists (start, end) ranges in seconds that are left exactly as they are.
 
     Rule 3 (first): where the upper register is a figuration (fast, few pitches, e.g.
-    sextuplet shimmers), keep every `figuration_keep`-th upper-register onset so the
-    figure stays regular at a fraction of the density.
+    sextuplet shimmers), re-voice it as a broken chord over the same pitches so no
+    string is plucked twice in a row (`refigure_shimmer`), and/or keep every
+    `figuration_keep`-th onset to lower the density.
     Rule 4: in those stretches, re-strike the last bass-register chord whenever the
     bass has been silent for `support_gap` seconds, so the harmony keeps ringing.
     Rules 1-2 then prune the accompaniment: no pitch re-struck within
@@ -136,6 +167,13 @@ def thin(notes: list[Note], melody: list[Note], repeat_window: float = 0.3, busy
                     last_t = t
                     report.added_support += len(last_chord)
             lower = lower + extra
+        notes = sorted(upper + lower, key=lambda n: (n.t, n.pitch))
+
+    if refigure_shimmer:
+        upper = [n for n in notes if n.pitch >= BASS_SPLIT]
+        lower = [n for n in notes if n.pitch < BASS_SPLIT]
+        upper, changed = devoice_repeats(cluster_onsets(upper, window), protected)
+        report.refigured += changed
         notes = sorted(upper + lower, key=lambda n: (n.t, n.pitch))
 
     mel, acc = split_melody(notes, melody)

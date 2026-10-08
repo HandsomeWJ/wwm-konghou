@@ -37,12 +37,29 @@ def test_figuration_is_halved_and_supported():
     pattern = [69, 71, 71, 71, 69, 64]
     melody = [Note(i / 6.0, pattern[i % 6]) for i in range(72)]
     chord = [Note(0.0, p) for p in (40, 47, 52)]
-    out, rep = thin(sorted(melody + chord, key=lambda n: (n.t, n.pitch)), melody, support_gap=2.2)
+    out, rep = thin(sorted(melody + chord, key=lambda n: (n.t, n.pitch)), melody, support_gap=2.2, figuration_keep=2)
     mel_out = sorted((n for n in out if n.pitch >= 60), key=lambda n: n.t)
     assert 30 <= len(mel_out) <= 40 and rep.dropped_figuration >= 30
     gaps = [b.t - a.t for a, b in zip(mel_out, mel_out[1:])]
     assert max(gaps) < 0.4 and min(gaps) > 0.3  # regular: every other note
     assert rep.added_support >= 9  # the chord was re-struck about every 2.2 s
+
+
+def test_refigure_turns_repeated_notes_into_an_alternation():
+    pattern = [69, 71, 71, 71, 69, 64]
+    melody = [Note(i / 6.0, pattern[i % 6]) for i in range(72)]
+    out, rep = thin(melody, melody)  # defaults: keep every onset, re-voice fast repeats
+    seq = [n.pitch for n in sorted(out, key=lambda n: n.t)]
+    assert len(seq) == 72 and rep.refigured == 12  # one swap per A B B B A E group
+    assert all(a != b for a, b in zip(seq, seq[1:]))          # no string plucked twice in a row
+    assert set(seq) == {64, 69, 71}                             # same pitch set
+    assert seq[:6] == [69, 71, 69, 71, 69, 64]                  # A B A B A E
+
+
+def test_refigure_leaves_slow_repeats_alone():
+    melody = [Note(i * 0.4, 72) for i in range(10)]  # a repeated note at 0.4 s is a real melody
+    out, rep = thin(melody, melody)
+    assert rep.refigured == 0 and all(n.pitch == 72 for n in out)
 
 
 def test_figuration_rule_leaves_a_varied_melody_alone():
