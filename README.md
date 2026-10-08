@@ -92,7 +92,10 @@ note nearby):
 .venv/bin/wwm arrange out/song.melody.mid --voices 1
 ```
 
-`--staff 1` takes the bass staff instead, for a bass-only line to layer later.
+Add `--bass` for a sparse bass line under it: the bass staff's lowest note on the
+strong beats only (beat 1, and the half-measure beat in even meters), each checked
+against the recording the same way; `--bass-min-gap 2` thins it further. Arrange the
+result with `--voices 2`.
 
 ### Modes
 

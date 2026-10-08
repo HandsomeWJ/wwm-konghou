@@ -176,23 +176,37 @@ main.add_command(merge_cmd, name="merge")
 @click.option("--staff", default=0, show_default=True, help="Which staff carries the melody (0 = treble)")
 @click.option("--align", "align_midi", default=None, type=click.Path(exists=True), help="Full score or merged MIDI on the same timeline, used to align with the recording")
 @click.option("--recording", "recording_midi", default=None, type=click.Path(exists=True), help="Transcription of the recording: moves the melody onto its timeline and checks every note")
-def melody(musicxml, out, bpm, staff, align_midi, recording_midi) -> None:
-    """Extract the melody (top line of one staff) from a score, optionally timed and checked against a recording."""
+@click.option("--bass/--no-bass", default=False, show_default=True, help="Add the bass staff's lowest note on strong beats")
+@click.option("--bass-staff", default=1, show_default=True, help="Which staff carries the bass")
+@click.option("--bass-min-gap", default=0.0, show_default=True, help="Extra thinning: seconds between bass notes")
+def melody(musicxml, out, bpm, staff, align_midi, recording_midi, bass, bass_staff, bass_min_gap) -> None:
+    """Extract the melody (top line of one staff) from a score, optionally with a sparse bass, timed and checked against a recording."""
     from .export import write_midi
-    from .melody import melody_from_score
+    from .melody import bass_line, melody_from_score, snap_bass_to_recording
+    from .merge import retime as do_retime
     from .omr import parse_tempo_map
 
     align = load_midi(align_midi) if align_midi else None
     rec = load_midi(recording_midi) if recording_midi else None
     if (align is None) != (rec is None):
         raise click.ClickException("--align and --recording go together")
-    notes, report, anchors = melody_from_score(musicxml, parse_tempo_map(bpm), align, rec, part_index=staff)
-    out_path = Path(out) if out else Path(musicxml).with_suffix(".melody.mid")
-    write_midi(notes, out_path, clamp=False)
+    tmap = parse_tempo_map(bpm)
+    notes, report, anchors = melody_from_score(musicxml, tmap, align, rec, part_index=staff)
     if report:
-        for line in report.lines():
+        for line in report.lines("melody"):
             click.echo(line)
         click.echo(f"aligned through {anchors} anchors")
+    if bass:
+        low = bass_line(musicxml, tmap, part_index=bass_staff, min_gap=bass_min_gap)
+        if align is not None and rec is not None:
+            low, _ = do_retime(align, rec, apply_to=low)
+            low, brep = snap_bass_to_recording(low, rec)
+            for line in brep.lines("bass"):
+                click.echo(line)
+        click.echo(f"bass notes {len(low)}")
+        notes = sorted(notes + low, key=lambda n: (n.t, n.pitch))
+    out_path = Path(out) if out else Path(musicxml).with_suffix(".melody.mid")
+    write_midi(notes, out_path, clamp=False)
     click.echo(f"wrote {out_path} ({len(notes)} notes, {notes[-1].t:.1f}s)")
 
 

@@ -31,3 +31,21 @@ def test_snap_fixes_octave_and_keeps_confirmed():
     out, rep = snap_to_recording(melody, recording)
     assert [n.pitch for n in out] == [76, 79, 84, 60]
     assert (rep.confirmed, rep.octave_fixed, rep.replaced, rep.unconfirmed) == (2, 1, 0, 1)
+
+
+def test_bass_line_keeps_strong_beats_only(tmp_path):
+    from wwm.melody import bass_line
+
+    xml = tmp_path / "b.musicxml"
+    s = stream.Score()
+    rh, lh = stream.Part(id="rh"), stream.Part(id="lh")
+    for p, c in ((rh, clef.TrebleClef()), (lh, clef.BassClef())):
+        p.insert(0, instrument.Piano()); p.append(c); p.append(meter.TimeSignature("4/4"))
+    for _ in range(4):
+        rh.append(note.Note("E5", quarterLength=1))
+    for name in ("C3", "G3", "E3", "G3"):  # beats 1 2 3 4; lowest-on-strong-beats = C3 (beat 1), E3 (beat 3)
+        lh.append(chord.Chord([name, "C4"], quarterLength=1))
+    s.insert(0, rh); s.insert(0, lh)
+    s.write("musicxml", fp=str(xml))
+    low = bass_line(xml, {1: 120.0})
+    assert [(round(n.t, 2), n.pitch) for n in low] == [(0.0, 48), (1.0, 52)]

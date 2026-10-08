@@ -120,24 +120,13 @@ def parse_tempo_map(spec: str | float | None) -> dict[int, float] | None:
     return out or None
 
 
-def score_notes(score, tempo_map: dict[int, float] | None):
-    """Flatten a music21 score to Note events in seconds without makeNotation (which
-    chokes on OMR voice numbering). Tempo: the explicit map by measure number, else the
-    score's metronome marks, else 120 quarter BPM."""
+def tempo_function(score, tempo_map: dict[int, float] | None):
+    """seconds(quarter-length offset) for a music21 score or part: the explicit map by
+    measure number, else the score's metronome marks, else 120 quarter BPM."""
     from music21 import stream, tempo as m21tempo
 
-    from .arrange import Note
-
-    try:
-        expanded = score.expandRepeats()
-        if expanded is not None:
-            score = expanded
-    except Exception:
-        pass
-
-    # tempo segments as (offset in quarter lengths, quarter BPM)
-    segments: list[tuple[float, float]] = []
     parts = list(score.parts) if hasattr(score, "parts") else [score]  # a single Part works too
+    segments: list[tuple[float, float]] = []
     if tempo_map:
         measure_offsets: dict[int, float] = {}
         for part in parts:
@@ -168,7 +157,29 @@ def score_notes(score, tempo_map: dict[int, float] | None):
             total += (min(ql, nxt) - off) * 60.0 / bpm
         return total
 
+    return seconds
+
+
+def expand_repeats(score):
+    try:
+        expanded = score.expandRepeats()
+        if expanded is not None:
+            return expanded
+    except Exception:
+        pass
+    return score
+
+
+def score_notes(score, tempo_map: dict[int, float] | None, with_beats: bool = False):
+    """Flatten a music21 score (or part) to Note events in seconds without makeNotation
+    (which chokes on OMR voice numbering). With `with_beats`, returns (notes, beats)
+    where beats holds (beat position, beats per measure) for every note."""
+    from .arrange import Note
+
+    score = expand_repeats(score)
+    seconds = tempo_function(score, tempo_map)
     notes: list[Note] = []
+    beats: list[tuple[float, int]] = []
     for el in score.recurse().notes:
         if el.isRest:
             continue
@@ -176,9 +187,21 @@ def score_notes(score, tempo_map: dict[int, float] | None):
         t = seconds(start)
         dur = max(seconds(start + float(el.duration.quarterLength)) - t, 0.05)
         vel = el.volume.velocity if el.volume and el.volume.velocity else 80
+        if with_beats:
+            try:
+                beat = float(el.beat)
+                ts = el.getContextByClass("TimeSignature")
+                count = int(ts.beatCount) if ts is not None else 4
+            except Exception:
+                beat, count = 1.0, 4
         for p in el.pitches:
             notes.append(Note(t, int(p.midi), int(vel), dur))
-    notes.sort(key=lambda n: (n.t, n.pitch))
+            if with_beats:
+                beats.append((beat, count))
+    order = sorted(range(len(notes)), key=lambda i: (notes[i].t, notes[i].pitch))
+    notes = [notes[i] for i in order]
+    if with_beats:
+        return notes, [beats[i] for i in order]
     return notes
 
 
