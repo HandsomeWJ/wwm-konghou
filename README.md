@@ -32,6 +32,9 @@ images unless you pass `--engine`.
 .venv/bin/wwm transcribe song.mp3 -o out/song.mid              # mp3 / wav / flac
 .venv/bin/wwm omr score.pdf --bpm 90 -o out/song.mid           # pdf / png / jpg; --engine audiveris|homr
 
+#    fixed a misread in MuseScore? export MusicXML and convert it:
+.venv/bin/wwm xml2mid out/song.musicxml --bpm 112.5 -o out/song.mid   # bpm is per quarter note
+
 # 2. reduce it to the Konghou's 3 octaves and write the key script
 .venv/bin/wwm arrange out/song.mid --mode 36 --voices 4
 #    -> out/song.wwm.mid   plain MIDI inside C3-B5 (any community MIDI player can play it)
@@ -104,6 +107,18 @@ A native `cargo build` gives a Mac binary that only supports `--dry-run`.
 
 Measured on that fixture (G major, two hands, 36 notes): homr 36/36 on both the
 910 px PNG and the PDF; Audiveris 36/36 on the PDF, 33/36 on the PNG.
+
+When you have both a recording and a score of the same piece, align them to see
+how much of the score the OMR got and where it went wrong:
+
+```bash
+.venv/bin/python scripts/align_midi.py out/song_from_mp3.mid out/song_from_score.mid
+```
+
+On a real 7-page scanned arrangement (6 flats, 6/8, watermarked) against the
+ByteDance transcription of its recording: Audiveris reproduced 86% of the notes
+exactly with 4 divergent regions, homr 75% with 8. Neither engine read the tempo
+mark, so pass `--bpm` to `wwm omr` or `wwm xml2mid`.
 
 ## Risk
 

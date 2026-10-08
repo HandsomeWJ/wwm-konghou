@@ -113,5 +113,18 @@ def omr(score: str, out: str | None, engine: str, bpm: float | None) -> None:
     click.echo(f"wrote {out_path} ({info['notes']} notes, {info['pages']} page(s), {info['engine']}); MusicXML at {info['musicxml']}")
 
 
+@main.command()
+@click.argument("musicxml", type=click.Path(exists=True, dir_okay=False))
+@click.option("-o", "--out", default=None, help="MIDI path (default: next to the MusicXML)")
+@click.option("--bpm", default=None, type=float, help="Tempo in quarter notes per minute (a dotted-quarter mark of 75 in 6/8 is 112.5)")
+def xml2mid(musicxml: str, out: str | None, bpm: float | None) -> None:
+    """Convert a MusicXML file (e.g. fixed in MuseScore) to MIDI."""
+    from .omr import musicxml_to_midi
+
+    out_path = Path(out) if out else Path(musicxml).with_suffix(".mid")
+    notes, _ = musicxml_to_midi([Path(musicxml)], out_path, bpm=bpm)
+    click.echo(f"wrote {out_path} ({notes} notes)")
+
+
 if __name__ == "__main__":
     main()
