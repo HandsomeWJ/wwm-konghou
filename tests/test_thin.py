@@ -27,7 +27,7 @@ def test_thin_spaces_accompaniment_under_a_running_melody():
     melody = [Note(i * 0.125, 60 + (i * 5) % 24) for i in range(40)]  # 8 notes/s, wide-ranging: a run, not a figure
     acc = [Note(i * 0.125, 24 + (i % 7) * 2) for i in range(40)]  # 8 notes/s, two octaves under the melody
     out, rep = thin(sorted(melody + acc, key=lambda n: (n.t, n.pitch)), melody, busy_gap=0.25)
-    acc_out = sorted((n for n in out if n.pitch < 70), key=lambda n: n.t)
+    acc_out = sorted((n for n in out if n.pitch < 55), key=lambda n: n.t)
     assert rep.dropped_busy > 0
     assert all(b.t - a.t >= 0.25 - 1e-9 for a, b in zip(acc_out, acc_out[1:]))
 
