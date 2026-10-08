@@ -76,13 +76,25 @@ Play `out/calibration.wwm.json` in game. It contains a chromatic scale C3→B5
 (every key and every Shift combo), a C major chord twice, a C–E–G# chord twice
 (Shift must not leak onto C and E), eight fast G4 repeats, then a scale run in 16ths.
 
-You do not need to judge it by ear. Record the game while it plays (Xbox Game Bar,
-Win+Alt+R, with game music and ambience turned down in the game's audio settings)
-and let the verifier read the recording:
+You do not need to judge it by ear. The player can record what the PC plays while
+the script runs (WASAPI loopback of the default output device; turn game music and
+ambience down first so only the instrument is heard):
 
 ```bash
-.venv/bin/wwm verify "Where Winds Meet 2026-10-09.mp4" out/calibration.wwm.json
+wwm-play.exe calibration.wwm.json --record calibration.wav
 ```
+
+That writes `calibration.wav` and `calibration.wav.json` (the exact offset of the
+first note). `--list-devices` shows the output devices, `--record-device "<name>"`
+picks one that is not the default. Copy both files to the Mac and let the verifier
+read them:
+
+```bash
+.venv/bin/wwm verify calibration.wav out/calibration.wwm.json
+```
+
+Any other recording works too (Xbox Game Bar, OBS; mp4/mkv/mp3/wav); without the
+sidecar the verifier locates the script in the recording by its onset pattern.
 
 It finds where the script starts in the recording, checks every onset for the
 expected pitches (pYIN for slow notes, spectral rise and onset detection for fast
@@ -104,7 +116,9 @@ percentage of notes heard and lists the misses.
 ```
 wwm-play.exe song.wwm.json [--speed 1.0] [--hold-ms 20] [--modifier-settle-ms 25]
                            [--lead-in 3] [--start-at 30] [--window "Where Winds Meet"]
-                           [--focus] [--background] [--no-guard] [--now] [--dry-run]
+                           [--process wwm.exe] [--focus] [--background] [--no-guard]
+                           [--record out.wav] [--record-device "<name>"] [--now] [--dry-run]
+wwm-play.exe --list-windows | --list-devices
 ```
 
 - Default (foreground) mode sends scan codes to whatever is in front, exactly like a

@@ -14,6 +14,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 [target.'cfg(windows)'.dependencies]
+cpal = "0.16"
+hound = "3"
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
     "Win32_Media",

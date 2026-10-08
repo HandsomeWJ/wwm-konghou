@@ -1,6 +1,7 @@
 """wwm command line: calib | arrange | preview | transcribe | omr."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import click
@@ -176,6 +177,11 @@ def verify(recording: str, script: str, offset: float | None, verbose: bool) -> 
 
     data = load_script(script)
     y = load_audio(recording)
+    sidecar = Path(recording + ".json")
+    if offset is None and sidecar.exists():
+        meta = json.loads(sidecar.read_text(encoding="utf-8"))
+        offset = float(meta.get("offset_s", 0.0))
+        click.echo(f"using offset {offset:.2f}s from {sidecar.name}")
     report = run_verify(data, y, offset=offset)
     for line in report_lines(report, verbose):
         click.echo(line)

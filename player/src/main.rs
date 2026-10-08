@@ -1,5 +1,6 @@
 //! wwm-play: sends a .wwm.json key script to Where Winds Meet with frame-accurate timing.
 mod input;
+mod record;
 mod score;
 
 use std::collections::HashSet;
@@ -15,7 +16,7 @@ use score::{Event, Script};
 #[command(name = "wwm-play", version, about = "Plays a .wwm.json key script into Where Winds Meet")]
 struct Args {
     /// Script produced by `wwm arrange` (song.wwm.json)
-    #[arg(required_unless_present = "list_windows")]
+    #[arg(required_unless_present_any = ["list_windows", "list_devices"])]
     script: Option<String>,
     /// Playback speed multiplier (0.5 = half speed)
     #[arg(long, default_value_t = 1.0)]
@@ -56,6 +57,15 @@ struct Args {
     /// Print key events instead of sending them
     #[arg(long)]
     dry_run: bool,
+    /// Record what the PC plays while the script runs into this WAV (plus a .json sidecar for `wwm verify`)
+    #[arg(long)]
+    record: Option<String>,
+    /// Output device to record (name substring; default: the Windows default output device)
+    #[arg(long)]
+    record_device: Option<String>,
+    /// Print the output devices that can be recorded, then exit
+    #[arg(long)]
+    list_devices: bool,
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -449,6 +459,15 @@ fn spin_sleep(d: Duration) {
 
 fn main() {
     let args = Args::parse();
+    if args.list_devices {
+        #[cfg(windows)]
+        for name in record::list_devices() {
+            println!("{name}");
+        }
+        #[cfg(not(windows))]
+        println!("not on Windows: no devices");
+        return;
+    }
     if args.list_windows {
         println!("{:<28} {:<10} title", "process", "size");
         for w in platform::list_windows() {
@@ -549,13 +568,54 @@ fn main() {
     }
     platform::precise_timers(true);
     let lead = Duration::from_secs_f64(args.lead_in.max(0.0));
+    #[cfg(windows)]
+    let recorder = match &args.record {
+        Some(_) if !args.dry_run => match record::Recorder::start(args.record_device.as_deref()) {
+            Ok(r) => {
+                println!("recording {} ({} Hz) ...", r.device_name, r.sample_rate);
+                Some(r)
+            }
+            Err(e) => {
+                eprintln!("error: {e}");
+                std::process::exit(2);
+            }
+        },
+        _ => None,
+    };
     if lead > Duration::ZERO {
         println!("starting in {:.0}s ...", lead.as_secs_f64());
     }
     let started = Instant::now();
-    match player.run(&events, lead) {
+    let flow = player.run(&events, lead);
+    match flow {
         Flow::Stop => println!("stopped after {:.1}s", started.elapsed().as_secs_f64()),
         Flow::Go => println!("done in {:.1}s", started.elapsed().as_secs_f64()),
     }
     platform::precise_timers(false);
+    #[cfg(windows)]
+    if let (Some(rec), Some(path)) = (recorder, &args.record) {
+        std::thread::sleep(Duration::from_millis(1500)); // let the last note ring out
+        match rec.finish(path) {
+            Ok((secs, elapsed)) => {
+                println!("recorded {secs:.1}s to {path} (elapsed {elapsed:.1}s)");
+                if (secs - elapsed).abs() > 0.05 * elapsed {
+                    println!("warning: recording length differs from elapsed time; the capture device may have paused");
+                }
+                let sidecar = format!("{path}.json");
+                let meta = serde_json::json!({
+                    "script": script_path,
+                    "offset_s": lead.as_secs_f64(),
+                    "speed": args.speed,
+                    "seconds": secs,
+                    "stopped_early": matches!(flow, Flow::Stop),
+                });
+                if let Err(e) = std::fs::write(&sidecar, serde_json::to_string_pretty(&meta).unwrap()) {
+                    eprintln!("warning: cannot write {sidecar}: {e}");
+                } else {
+                    println!("wrote {sidecar}");
+                }
+            }
+            Err(e) => eprintln!("error: {e}"),
+        }
+    }
 }
