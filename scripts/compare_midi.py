@@ -14,11 +14,18 @@ sys.path.insert(0, ".")
 from wwm.arrange import load_midi  # noqa: E402
 
 
-def align(notes):
+def align(notes, t0=None):
     if not notes:
         return []
-    t0 = notes[0].t
+    if t0 is None:
+        t0 = notes[0].t
     return [(n.t - t0, n.pitch) for n in notes]
+
+
+def best_offset(truth, pred, tol):
+    """Try offsets implied by the first few notes of each file and keep the one with most matches."""
+    cands = {0.0} | {t - t2 for t, _ in truth[:6] for t2, _ in pred[:6]}
+    return max(cands, key=lambda off: f1(truth, [(t + off, p) for t, p in pred], tol)[2])
 
 
 def f1(truth, pred, tol):
@@ -49,13 +56,17 @@ def main():
     ap.add_argument("--tol", type=float, default=0.08)
     ap.add_argument("--fit-tempo", action="store_true", help="rescale pred time so total durations match")
     args = ap.parse_args()
-    truth = align(load_midi(args.truth))
-    pred = align(load_midi(args.pred))
+    truth = align(load_midi(args.truth), 0.0)
+    pred = align(load_midi(args.pred), 0.0)
     if args.fit_tempo and truth and pred and pred[-1][0] > 0:
+        truth = align(load_midi(args.truth))
+        pred = align(load_midi(args.pred))
         k = truth[-1][0] / pred[-1][0]
         pred = [(t * k, p) for t, p in pred]
+    off = best_offset(truth, pred, args.tol)
+    pred = [(t + off, p) for t, p in pred]
     prec, rec, f = f1(truth, pred, args.tol)
-    print(f"truth {len(truth)} notes, pred {len(pred)} notes")
+    print(f"truth {len(truth)} notes, pred {len(pred)} notes, offset {off * 1000:+.0f} ms")
     print(f"onset+pitch  P {prec:.2f}  R {rec:.2f}  F1 {f:.2f}  (tol {args.tol * 1000:.0f} ms)")
     print(f"pitch sequence similarity {pitch_similarity(truth, pred):.2f}")
 

@@ -91,6 +91,17 @@ def test_21_key_mode_transposes_to_c_major():
     assert all((p + shift) % 12 in {0, 2, 4, 5, 7, 9, 11} for p in [62, 64, 66, 67, 69, 71, 73, 74])
 
 
+def test_21_key_mode_prefers_moving_key_over_wrong_notes():
+    # G major melody over a low bass: shifting -7 removes the F# at the cost of folding bass octaves
+    rh = [Note(i * 0.5, p) for i, p in enumerate([74, 79, 78, 79, 81, 83, 81, 79, 78, 74])]
+    lh = [Note(i * 1.0, p) for i, p in enumerate([43, 50, 55, 43, 47])]
+    onsets = cluster_onsets(rh + lh, 0.03)
+    shift = choose_transposition(onsets, ArrangeOptions(mode="21"))
+    assert shift != 0
+    assert all((n.pitch + shift) % 12 in {0, 2, 4, 5, 7, 9, 11} for n in rh + lh)
+    assert choose_transposition(onsets, ArrangeOptions(mode="36")) == 0
+
+
 def test_36_key_mode_keeps_key_when_accidentals_are_cheap():
     d_major = [Note(i * 0.5, p) for i, p in enumerate([62, 64, 66, 67, 69, 71, 73, 74])]
     onsets = cluster_onsets(d_major, 0.03)

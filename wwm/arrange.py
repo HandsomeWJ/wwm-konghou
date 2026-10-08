@@ -130,7 +130,10 @@ def transposition_score(onsets: list[Onset], shift: int, opts: ArrangeOptions) -
         top = max(pitches)
         for p in pitches:
             w = 1.5 if p == top else 1.0
-            s = 1.0 if opts.lo <= p <= opts.hi else 0.35
+            if opts.lo <= p <= opts.hi:
+                s = 1.0
+            else:  # folding the melody wrecks its contour; folding a bass note is mild
+                s = 0.35 if p == top else 0.8
             if p % 12 not in SCALE_PCS:
                 s -= accidental_penalty
             total += w * s
