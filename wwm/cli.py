@@ -217,8 +217,19 @@ def verify(recording: str, script: str, offset: float | None, verbose: bool) -> 
         near = float(meta.get("offset_s", 0.0))
         click.echo(f"recorder says the first key went out {near:.2f}s in; refining for audio latency")
     report = run_verify(data, y, offset=offset, near=near)
-    for line in report_lines(report, verbose):
+    for line in report_lines(report, verbose, y=y):
         click.echo(line)
+    if len(report.events) > 200 and not verbose:
+        win = 20.0
+        click.echo("per 20 s window:")
+        k = 0
+        while k * win <= report.events[-1].t:
+            evs = [e for e in report.events if k * win <= e.t < (k + 1) * win]
+            exp = sum(len(e.expected) for e in evs)
+            if exp:
+                heard = exp - sum(len(e.missing) for e in evs)
+                click.echo(f"  {k * win:4.0f}-{(k + 1) * win:4.0f}s  {100 * heard / exp:4.0f}%  ({heard}/{exp})")
+            k += 1
     summary = calibration_summary(report, y)
     if summary:
         click.echo("calibration summary:")

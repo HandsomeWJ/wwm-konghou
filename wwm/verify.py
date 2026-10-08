@@ -312,13 +312,43 @@ def calibration_summary(report: VerifyReport, y: np.ndarray, sr: int = SR) -> li
     return lines
 
 
-def report_lines(report: VerifyReport, verbose: bool = False) -> list[str]:
+def classify_misses(report: VerifyReport, y: np.ndarray, sr: int = SR) -> dict[str, int]:
+    """Split the misses: a pitch whose band is below the take's floor right after its
+    onset was really dropped; one that is loud because it was struck within the last
+    1.5 s is sustaining and a re-strike cannot be told apart; the rest are sounding
+    but masked by louder chord notes."""
+    if not report.events:
+        return {}
+    times = [report.offset + e.t for e in report.events]
+    floor = reference_level(y, sr, times) - ABS_FLOOR_DB
+    counts = {"dropped (silent)": 0, "sustaining, re-strike unclear": 0, "sounding but masked": 0}
+    last: dict[int, float] = {}
+    for e in report.events:
+        for p in e.missing:
+            spec, fr = _spectrum(y, sr, report.offset + e.t + ANALYSIS_START, 0.3)
+            level = _band_max(spec, fr, p) if spec is not None else -200.0
+            if level < floor:
+                counts["dropped (silent)"] += 1
+            elif e.t - last.get(p, -9.0) < 1.5:
+                counts["sustaining, re-strike unclear"] += 1
+            else:
+                counts["sounding but masked"] += 1
+        for p in e.expected:
+            last[p] = e.t
+    return counts
+
+
+def report_lines(report: VerifyReport, verbose: bool = False, y: np.ndarray | None = None, sr: int = SR) -> list[str]:
     lines = [
         f"script starts {report.offset:.2f}s into the recording",
         f"notes heard: {report.sounded_notes}/{report.expected_notes} ({100 * report.sounded_notes / max(1, report.expected_notes):.0f}%)",
     ]
+    if y is not None and report.sounded_notes < report.expected_notes:
+        counts = classify_misses(report, y, sr)
+        lines.append("misses: " + ", ".join(f"{v} {k}" for k, v in counts.items()))
+    many = len(report.events) > 200
     for e in report.events:
-        if e.missing or e.leaked or verbose:
+        if (e.missing or e.leaked or verbose) and (verbose or not many):
             exp = " ".join(pitch_name(p) for p in e.expected)
             miss = " ".join(pitch_name(p) for p in e.missing) or "-"
             leak = " ".join(pitch_name(p) for p in e.leaked) or "-"
