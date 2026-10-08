@@ -78,6 +78,19 @@ breathe like the pianist:
 Every chord both sources agree on becomes a fixed point; times in between are
 interpolated, so the result keeps the recording's tempo changes and rubato.
 
+### Thinning the accompaniment
+
+Dense piano accompaniment, especially repeated chords, piles up on a sustaining
+instrument. `wwm thin` keeps the melody exactly and prunes the rest with two rules:
+an accompaniment pitch is not struck again within 0.3 s (the previous strike still
+rings), and while the melody runs fast, accompaniment onsets stay at least 0.25 s
+apart. Ranges you already like can be protected:
+
+```bash
+.venv/bin/wwm thin out/song.final.mid --melody out/song.melody.mid --protect 25-111 -o out/song.thin.mid
+.venv/bin/wwm arrange out/song.thin.mid --transpose-map "0-50:-1,50-999:0"   # keep the key regions of the earlier take
+```
+
 ### Melody only
 
 A sustaining harp turns dense piano accompaniment into a wash. For a clean

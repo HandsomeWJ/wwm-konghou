@@ -50,6 +50,7 @@ class ArrangeOptions:
     segment_range: tuple[int, int] = (-12, 5)  # down to an octave: a high melody may simply drop an octave
     off_key_cost: float = 0.03      # per note, for any shift other than 0: the original key wins ties
     max_groups: int = 2             # 36-key: chords needing more key groups lose inner notes (3 groups = a 100 ms roll)
+    fixed_segments: list[tuple[float, float, int]] | None = None  # explicit (start, end, shift) regions in seconds
 
 
 @dataclass
@@ -314,7 +315,10 @@ def arrange(notes: list[Note], opts: ArrangeOptions, keymap: KeyMap | None = Non
     if not notes:
         return [], report
     onsets = cluster_onsets(notes, opts.cluster_window)
-    if opts.transpose is not None:
+    if opts.fixed_segments:
+        t_first = onsets[0].t
+        segments = [(t_first + a, t_first + b, sh) for a, b, sh in opts.fixed_segments]
+    elif opts.transpose is not None:
         segments = [(onsets[0].t, onsets[-1].t + 1.0, opts.transpose)]
     elif opts.mode == "36" and opts.segment_transpose and keymap is not None:
         segments = choose_transposition_segments(onsets, opts, keymap)

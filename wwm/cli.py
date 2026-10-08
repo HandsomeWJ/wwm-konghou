@@ -37,6 +37,7 @@ def calib(out: str) -> None:
 @click.option("--mode", type=click.Choice(["36", "21"]), default="36", show_default=True, help="36: sharps via Shift; 21: naturals only")
 @click.option("--voices", default=4, show_default=True, help="Max simultaneous keys")
 @click.option("--transpose", default=None, type=int, help="Semitones; omit to search automatically")
+@click.option("--transpose-map", default=None, help="Explicit regions 'start-end:shift,...' in seconds, e.g. '0-50:-1,50-999:0'")
 @click.option("--keymap", "keymap_path", default=None, type=click.Path(exists=True), help="Keymap JSON (default: built-in Konghou layout)")
 @click.option("--snap", type=click.Choice(["down", "up", "drop"]), default="down", show_default=True, help="21-key: what to do with accidentals")
 @click.option("--retrigger-ms", default=40, show_default=True, help="Min gap between repeats of one key")
@@ -46,7 +47,7 @@ def calib(out: str) -> None:
 @click.option("--segments/--no-segments", default=True, show_default=True, help="36-key: choose the transposition per key region to avoid chords that need Shift and Ctrl at once")
 @click.option("--max-groups", default=2, show_default=True, help="36-key: a chord may need this many key groups (naturals, Shift, Ctrl); inner notes beyond that are dropped. 1 = never roll a chord")
 @click.option("--preview/--no-preview", default=True, show_default=True, help="Also render a WAV to listen to")
-def arrange_cmd(midi, out, mode, voices, transpose, keymap_path, snap, retrigger_ms, cluster_ms, min_velocity, hold_ms, segments, max_groups, preview) -> None:
+def arrange_cmd(midi, out, mode, voices, transpose, transpose_map, keymap_path, snap, retrigger_ms, cluster_ms, min_velocity, hold_ms, segments, max_groups, preview) -> None:
     """Reduce a MIDI to the Konghou range and write .wwm.mid + .wwm.json (+ preview WAV)."""
     keymap = KeyMap.load(keymap_path)
     opts = ArrangeOptions(
@@ -54,6 +55,13 @@ def arrange_cmd(midi, out, mode, voices, transpose, keymap_path, snap, retrigger
         min_retrigger=retrigger_ms / 1000, cluster_window=cluster_ms / 1000, min_velocity=min_velocity,
         segment_transpose=segments, max_groups=max_groups,
     )
+    if transpose_map:
+        fixed = []
+        for item in transpose_map.split(","):
+            span, sh = item.strip().split(":")
+            a, b = span.split("-")
+            fixed.append((float(a), float(b), int(sh)))
+        opts.fixed_segments = fixed
     notes = load_midi(midi)
     onsets, report = arrange(notes, opts, keymap)
     if not onsets:
@@ -208,6 +216,30 @@ def melody(musicxml, out, bpm, staff, align_midi, recording_midi, bass, bass_sta
     out_path = Path(out) if out else Path(musicxml).with_suffix(".melody.mid")
     write_midi(notes, out_path, clamp=False)
     click.echo(f"wrote {out_path} ({len(notes)} notes, {notes[-1].t:.1f}s)")
+
+
+@main.command()
+@click.argument("full_midi", type=click.Path(exists=True, dir_okay=False))
+@click.option("--melody", "melody_midi", required=True, type=click.Path(exists=True), help="Melody MIDI on the same timeline (from wwm melody); these notes are never touched")
+@click.option("-o", "--out", default=None, help="Output MIDI (default: <full>.thin.mid)")
+@click.option("--repeat-window", default=0.3, show_default=True, help="Seconds: an accompaniment pitch is not struck again within this")
+@click.option("--busy-gap", default=0.25, show_default=True, help="Seconds between accompaniment onsets while the melody runs fast")
+@click.option("--busy-rate", default=5.0, show_default=True, help="Melody notes per second that count as running fast")
+@click.option("--protect", default=None, help="Ranges left untouched, e.g. '25-111' or '25-111,200-210' (seconds)")
+def thin(full_midi, melody_midi, out, repeat_window, busy_gap, busy_rate, protect) -> None:
+    """Thin the accompaniment of a full arrangement for a sustaining instrument (melody untouched)."""
+    from .export import write_midi
+    from .thin import thin as do_thin
+
+    ranges = None
+    if protect:
+        ranges = [(float(a), float(b)) for a, b in (item.split("-") for item in protect.split(","))]
+    notes, report = do_thin(load_midi(full_midi), load_midi(melody_midi), repeat_window, busy_gap, busy_rate, protect=ranges)
+    out_path = Path(out) if out else Path(full_midi).with_suffix(".thin.mid")
+    write_midi(notes, out_path, clamp=False)
+    for line in report.lines():
+        click.echo(line)
+    click.echo(f"wrote {out_path} ({len(notes)} notes)")
 
 
 @main.command()
