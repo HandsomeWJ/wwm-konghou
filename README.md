@@ -25,6 +25,18 @@ Audiveris (engraved-score OMR) lives in `~/Applications/Audiveris.app` (or set
 `AUDIVERIS` to its binary). `wwm omr` picks Audiveris for PDFs and homr for
 images unless you pass `--engine`.
 
+## The window (Windows)
+
+`wwm-konghou.exe` is the same player with a window: double-click it next to your
+`.wwm.json` files, pick a script, press Start. Everything the command line offers is
+there: background mode, bring-to-front, the foreground guard, speed, Shift/Ctrl
+settle, key hold, lead-in, start-at, recording with device choice, a process-name
+field and a window list for odd setups, and a "keep on top" toggle so the progress
+bar stays visible over a windowed game. F8 and F9 still work from any window.
+`wwm-play.exe` remains the command-line version with identical behaviour.
+
+![window](player/tests/snapshots/gui.png)
+
 ## Workflow
 
 ```bash
