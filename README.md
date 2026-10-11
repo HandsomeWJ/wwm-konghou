@@ -1,6 +1,7 @@
 # wwm-konghou
 
-Turns a piano MP3 or a piano score into a Konghou performance in **Where Winds Meet**.
+Created by **HandsomeWJ**. Turns a piano MP3 or a piano score into a Konghou
+performance in **Where Winds Meet**.
 
 ```
 MP3 ──► wwm transcribe ──┐

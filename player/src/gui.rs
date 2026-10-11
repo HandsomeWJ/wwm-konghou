@@ -12,6 +12,9 @@ use crate::engine::{self, Control, Event, PlayOptions, Sink};
 use crate::platform;
 use crate::score::Script;
 
+pub const CREATOR: &str = "HandsomeWJ";
+pub const REPO_URL: &str = "https://github.com/HandsomeWJ/wwm-konghou";
+
 enum Msg {
     Ev(Event),
     Done(Result<(bool, f64), String>),
@@ -491,6 +494,11 @@ impl eframe::App for App {
                     for line in &self.log {
                         ui.monospace(line);
                     }
+                });
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(format!("Created by {CREATOR} · v{}", env!("CARGO_PKG_VERSION"))).weak());
+                    ui.hyperlink_to(egui::RichText::new("github.com/HandsomeWJ/wwm-konghou").weak(), REPO_URL);
                 });
             });
         });

@@ -7,7 +7,12 @@ use wwm_play::hotkeys::Hot;
 use wwm_play::platform;
 
 #[derive(Parser, Debug)]
-#[command(name = "wwm-play", version, about = "Plays a .wwm.json key script into Where Winds Meet")]
+#[command(
+    name = "wwm-play",
+    version,
+    about = "Plays a .wwm.json key script into Where Winds Meet",
+    after_help = "Created by HandsomeWJ · https://github.com/HandsomeWJ/wwm-konghou"
+)]
 struct Args {
     /// Script produced by `wwm arrange` (song.wwm.json)
     #[arg(required_unless_present_any = ["list_windows", "list_devices"])]
@@ -98,8 +103,9 @@ fn main() {
     };
     let control = Control::new(true);
     let wait_for_hotkey = cfg!(windows) && !args.now && !args.dry_run;
+    println!("wwm-play v{} · created by HandsomeWJ · https://github.com/HandsomeWJ/wwm-konghou", env!("CARGO_PKG_VERSION"));
     if wait_for_hotkey {
-        println!("wwm-play: {}", opts.script_path);
+        println!("script: {}", opts.script_path);
         println!("open the Konghou in free play, then press F8 to start (F8 pause, F9/Esc stop)");
         loop {
             std::thread::sleep(Duration::from_millis(10));

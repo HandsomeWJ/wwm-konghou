@@ -1,7 +1,9 @@
 [package]
 name = "wwm-play"
-version = "0.7.0"
+version = "0.7.1"
 edition = "2021"
+authors = ["HandsomeWJ"]
+repository = "https://github.com/HandsomeWJ/wwm-konghou"
 description = "Plays .wwm.json key scripts into Where Winds Meet"
 
 [lib]
